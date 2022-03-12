@@ -1,6 +1,6 @@
 # `loki-cli` - A Git Productivity CLI
 
-Git is a pretty great tool on it's own. But after some time common patterns emerge. `lk` is here to make those patterns fast.
+Git is a pretty great tool on it's own. After some time common patterns emerge. `lk` is here to make those patterns fast.
 
 ## Install
 
