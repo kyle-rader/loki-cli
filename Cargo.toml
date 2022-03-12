@@ -1,6 +1,8 @@
 [package]
 name = "loki-cli"
 version = "0.1.0"
+authors = ["Kyle W. Rader"]
+description = "A CLI for Git Productivity"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -10,3 +12,4 @@ name = "lk"
 path = "src/main.rs"
 
 [dependencies]
+clap = { version = "3.1.6", features = ["derive"] }
