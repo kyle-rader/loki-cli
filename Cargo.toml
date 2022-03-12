@@ -3,6 +3,12 @@ name = "loki-cli"
 version = "0.1.0"
 authors = ["Kyle W. Rader"]
 description = "A CLI for Git Productivity"
+homepage = "https://github.com/kyle-rader/loki"
+repository = "https://github.com/kyle-rader/loki"
+readme = "README.md"
+license-file = "LICENSE"
+keywords = ["git", "productivity"]
+categories = ["command-line-utilities"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
