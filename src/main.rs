@@ -1,4 +1,4 @@
-use std::{ffi::OsStr, process::Command};
+pub mod git;
 
 use clap::Parser;
 
@@ -6,6 +6,8 @@ use clap::Parser;
 #[clap(version, about, author)]
 enum Cli {
     /// Create a new branch and push it to origin.
+    /// All values given are joined with a "-" to form a valid git branch name.
+    /// e.g. "lk new cool branch" creates "cool-branch".
     #[clap(visible_alias = "n")]
     New { name: Vec<String> },
 }
@@ -26,26 +28,15 @@ fn new_branch(name: &Vec<String>) -> Result<(), String> {
 
     let name = name.join("-");
 
-    git(
+    git::git_command(
         "create new branch",
         vec!["switch", "--create", name.as_str()],
     )?;
 
-    git(
+    git::git_command(
         "push to origin",
         vec!["push", "--set-upstream", "origin", name.as_str()],
     )?;
 
-    Ok(())
-}
-
-fn git<I, S>(name: &str, args: I) -> Result<(), String>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<OsStr>,
-{
-    if let Some(error) = Command::new("git").args(args).status().err() {
-        return Err(format!("{} failed to run: {}", name, error));
-    }
     Ok(())
 }
