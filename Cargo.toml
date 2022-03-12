@@ -1,11 +1,12 @@
 [package]
 name = "loki-cli"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Kyle W. Rader"]
 description = "A CLI for Git Productivity"
 homepage = "https://github.com/kyle-rader/loki-cli"
 repository = "https://github.com/kyle-rader/loki-cli"
 readme = "README.md"
+license = "MIT"
 license-file = "LICENSE"
 keywords = ["git", "productivity"]
 categories = ["command-line-utilities"]
