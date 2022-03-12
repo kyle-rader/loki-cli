@@ -7,7 +7,6 @@ homepage = "https://github.com/kyle-rader/loki-cli"
 repository = "https://github.com/kyle-rader/loki-cli"
 readme = "README.md"
 license = "MIT"
-license-file = "LICENSE"
 keywords = ["git", "productivity"]
 categories = ["command-line-utilities"]
 edition = "2021"
