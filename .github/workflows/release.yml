@@ -11,12 +11,13 @@ jobs:
     runs-on: ubuntu-latest
     env:
       cr: cargo-release
-      cr_dir: "${{ env.RUNNER_TEMP }}/cr"
+      cr_dir: cr
       cr_package: "https://github.com/crate-ci/cargo-release/releases/download/v0.20.3/cargo-release-v0.20.3-x86_64-unknown-linux-gnu.tar.gz"
     steps:
     - uses: actions/checkout@v2
     - name: Install cargo-release
       run: |
+        export cr_dir=$RUNNER_TEMP/$cr_dir
         mkdir -p $cr_dir
         pushd $cr_dir
         curl -L $cr_package -o cr.tar.gz
