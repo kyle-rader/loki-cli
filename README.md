@@ -5,7 +5,7 @@ Git is a pretty great tool on it's own. After some time common patterns emerge. 
 # Install
 
 1. First, install `cargo` by visiting https://rustup.rs.
-2. Install with `cargo`:
+2. Install with `cargo` ([📦 loki-cli ](https://crates.io/crates/loki-cli)):
 
     ```shell
     cargo install loki-cli
@@ -15,7 +15,7 @@ Git is a pretty great tool on it's own. After some time common patterns emerge. 
 ## Get Help
 ```shell
 ❯ lk --help
-loki-cli 0.1.2
+loki-cli 0.2.0
 Kyle W. Rader
 A CLI for Git Productivity
 
@@ -28,14 +28,14 @@ OPTIONS:
 
 SUBCOMMANDS:
     help    Print this message or the help of the given subcommand(s)
-    new     Create a new branch and push it to origin. All values given are joined with a "-" to
-                form a valid git branch name. e.g. "lk new cool branch" creates "cool-branch"
-                [aliases: n]
+    new     Create a new branch from HEAD and push it to origin [aliases: n]
+    push    Push the current branch to origin with --set-upstream
 ```
 
 ## Commands
 
-### `new` (`n`)
+### `new`
+Alias: `n`
 * Make creating a new branch easier to type by joining all given args with a dash (`-`).
 * Automatically push and setup tracking to `origin`.
 
@@ -45,10 +45,13 @@ SUBCOMMANDS:
 Switched to a new branch 'readme-updates'
 Total 0 (delta 0), reused 0 (delta 0), pack-reused 0
 remote:
-remote: Create a pull request for 'readme-updates' on GitHub by visiting:
-remote:      https://github.com/kyle-rader/loki-cli/pull/new/readme-updates
-remote:
 To github.com:kyle-rader/loki-cli.git
  * [new branch]      readme-updates -> readme-updates
 branch 'readme-updates' set up to track 'origin/readme-updates'.
 ```
+
+### `push`
+Alias: none
+* Pushes the current branch to origin with `--set-upstream`.
+* `-f|--force` flag uses `--force-with-lease` under the hood for better force push safety.
+* Only works if `HEAD` is on a branch (not in a dettached state).
