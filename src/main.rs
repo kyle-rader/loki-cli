@@ -28,15 +28,16 @@ fn new_branch(name: &Vec<String>) -> Result<(), String> {
 
     let name = name.join("-");
 
-    git::git_command(
-        "create new branch",
-        vec!["switch", "--create", name.as_str()],
-    )?;
-
-    git::git_command(
-        "push to origin",
-        vec!["push", "--set-upstream", "origin", name.as_str()],
-    )?;
+    git::git_commands(vec![
+        (
+            "create new branch",
+            vec!["switch", "--create", name.as_str()],
+        ),
+        (
+            "push to origin",
+            vec!["push", "--set-upstream", "origin", name.as_str()],
+        ),
+    ])?;
 
     Ok(())
 }

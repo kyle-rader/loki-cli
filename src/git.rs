@@ -10,3 +10,15 @@ where
     }
     Ok(())
 }
+
+pub fn git_commands<C, I, S>(commands: C) -> Result<(), String>
+where
+    C: IntoIterator<Item = (&'static str, I)>,
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    commands
+        .into_iter()
+        .map(|(name, cmd)| git_command(name, cmd))
+        .collect()
+}
