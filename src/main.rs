@@ -5,11 +5,12 @@ use clap::Parser;
 #[derive(Parser)]
 #[clap(version, about, author)]
 enum Cli {
-    /// Create a new branch and push it to origin.
-    /// All values given are joined with a "-" to form a valid git branch name.
-    /// e.g. "lk new cool branch" creates "cool-branch".
+    /// Create a new branch from HEAD and push it to origin.
     #[clap(visible_alias = "n")]
-    New { name: Vec<String> },
+    New {
+        /// List of names to join with dashes to form a valid branch name.
+        name: Vec<String>,
+    },
 }
 
 fn main() -> Result<(), String> {
