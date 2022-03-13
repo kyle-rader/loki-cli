@@ -23,4 +23,4 @@ jobs:
         tar -xzf cr.tar.gz
         popd
     - name: Release
-      run: ./$cr_dir/$cr release --config release.toml
+      run: ./$cr_dir/$cr release --config release.toml --execute
