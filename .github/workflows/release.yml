@@ -6,13 +6,21 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
-
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      cr: cargo-release
+      cr_dir: cargo_release
+      cr_package: "https://github.com/crate-ci/cargo-release/releases/download/v0.20.3/cargo-release-v0.20.3-x86_64-unknown-linux-gnu.tar.gz"
     steps:
     - uses: actions/checkout@v2
     - name: Install cargo-release
-      run: cargo install cargo-release
+      run: |
+        mkdir $cr_dir
+        pushd $cr_dir
+        curl -L $cr_package -o cr.tar.gz
+        tar -xzf cr.tar.gz
+        popd
     - name: Release
-      run: cargo-release release --config release.toml
+      run: ./$cr_dir/$cr release --config release.toml
