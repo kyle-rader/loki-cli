@@ -1,4 +1,7 @@
+pub mod pruning;
+
 use std::{
+    collections::HashSet,
     ffi::OsStr,
     io::{BufRead, BufReader},
     process::{Command, Output, Stdio},
@@ -60,7 +63,6 @@ where
         for line in lines {
             match line {
                 Ok(line) => {
-                    println!("{line}");
                     process_line(&line);
                 }
                 Err(e) => eprintln!("{e}"),
