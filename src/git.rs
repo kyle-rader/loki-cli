@@ -56,21 +56,21 @@ where
         .map_err(|e| format!("{e}"))?;
 
     if let Some(stdout) = cmd.stdout.as_mut() {
-        let stdout_reader = BufReader::new(stdout);
-        let stdout_lines = stdout_reader.lines();
-        for line in stdout_lines {
-            if let Ok(line) = line {
-                println!("{line}");
-                process_line(&line);
+        let lines = BufReader::new(stdout).lines();
+        for line in lines {
+            match line {
+                Ok(line) => {
+                    println!("{line}");
+                    process_line(&line);
+                }
+                Err(e) => eprintln!("{e}"),
             }
         }
     }
 
-    match cmd.wait() {
-        Ok(status) => match status.success() {
-            true => Ok(()),
-            false => Err(format!("{name} failed to execute!")),
-        },
-        Err(e) => Err(format!("{e}")),
-    }
+    cmd.wait()
+        .map_err(|e| format!("{e}"))?
+        .success()
+        .then(|| ())
+        .ok_or(format!("{name} failed to execute"))
 }
