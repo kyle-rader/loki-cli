@@ -76,3 +76,9 @@ where
         .then(|| ())
         .ok_or(format!("{name} failed to execute"))
 }
+
+pub fn git_branches() -> Result<HashSet<String>, String> {
+    let mut branches: HashSet<String> = HashSet::new();
+
+    Ok(branches)
+}

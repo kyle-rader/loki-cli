@@ -21,6 +21,11 @@ enum Cli {
         #[clap(short, long)]
         force: bool,
     },
+
+    /// Pull with --prune deleting local branches pruned from the remote.
+    Pull,
+    /// Fetch with --prune deleting local branches pruned from the remote.
+    Fetch,
 }
 
 fn main() -> Result<(), String> {
@@ -29,6 +34,8 @@ fn main() -> Result<(), String> {
     match &cli {
         Cli::New { name } => new_branch(name)?,
         Cli::Push { force } => push_branch(*force)?,
+        Cli::Pull => todo!(),
+        Cli::Fetch => todo!(),
     }
     Ok(())
 }
