@@ -1,4 +1,5 @@
 pub mod git;
+pub mod pruning;
 
 use std::process::Output;
 

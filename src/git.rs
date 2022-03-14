@@ -1,5 +1,3 @@
-pub mod pruning;
-
 use std::{
     collections::HashSet,
     ffi::OsStr,
