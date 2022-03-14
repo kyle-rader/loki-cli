@@ -1,6 +1,7 @@
 use std::{
     ffi::OsStr,
-    process::{Command, Output},
+    io::{BufRead, BufReader},
+    process::{Command, Output, Stdio},
 };
 
 const GIT: &str = "git";
@@ -36,5 +37,40 @@ where
     match Command::new(GIT).args(args).output() {
         Ok(output) => Ok(output),
         Err(err) => Err(format!("{} failed: {}", name, err)),
+    }
+}
+
+pub fn git_command_process_lines<I, S>(
+    name: &str,
+    args: I,
+    process_line: fn(&String),
+) -> Result<(), String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let mut cmd = Command::new(GIT)
+        .args(args)
+        .stdout(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("{e}"))?;
+
+    if let Some(stdout) = cmd.stdout.as_mut() {
+        let stdout_reader = BufReader::new(stdout);
+        let stdout_lines = stdout_reader.lines();
+        for line in stdout_lines {
+            if let Ok(line) = line {
+                println!("{line}");
+                process_line(&line);
+            }
+        }
+    }
+
+    match cmd.wait() {
+        Ok(status) => match status.success() {
+            true => Ok(()),
+            false => Err(format!("{name} failed to execute!")),
+        },
+        Err(e) => Err(format!("{e}")),
     }
 }
