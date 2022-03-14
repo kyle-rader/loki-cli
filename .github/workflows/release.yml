@@ -26,4 +26,4 @@ jobs:
     - name: Release
       run: |
         export cr_dir=$RUNNER_TEMP/$cr_dir
-        $cr_dir/$cr release --config release.toml --execute
+        $cr_dir/$cr release --config release.toml --execute --no-confirm
