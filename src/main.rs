@@ -4,7 +4,8 @@ pub mod pruning;
 use std::process::Output;
 
 use clap::Parser;
-use git::{git_branches, git_command_output, git_command_status};
+use git::{git_branches, git_command_output, git_command_process_lines, git_command_status};
+use pruning::is_pruned_branch;
 
 #[derive(Parser)]
 #[clap(version, about, author)]
@@ -92,14 +93,29 @@ fn push_branch(force: bool) -> Result<(), String> {
 }
 
 fn pull_prune() -> Result<(), String> {
-    let branches = git_branches()?;
-
-    for b in branches.iter() {
-        println!("branch: {}", b);
-    }
-    Ok(())
+    prune("pull")
 }
 
 fn fetch_prune() -> Result<(), String> {
+    prune("fetch")
+}
+
+fn prune(cmd: &str) -> Result<(), String> {
+    let branches = git_branches()?;
+
+    for line in git_command_process_lines("pull with pruning", vec![cmd, "--prune"])?.into_iter() {
+        println!("{line}");
+        if let Some(pruned_branch) = is_pruned_branch(line) {
+            if branches.contains(&pruned_branch) {
+                match git_command_status(
+                    format!("delete branch {pruned_branch}").as_str(),
+                    vec!["branch", "-D", pruned_branch.as_str()],
+                ) {
+                    Ok(_) => println!("Deleted pruned branch {pruned_branch}"),
+                    Err(err) => eprintln!("Failed to delete pruned branch {pruned_branch}: {err}"),
+                }
+            }
+        }
+    }
     Ok(())
 }

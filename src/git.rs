@@ -41,15 +41,10 @@ where
     }
 }
 
-pub fn git_command_process_lines<I, S, F>(
-    name: &str,
-    args: I,
-    process_line: F,
-) -> Result<(), String>
+pub fn git_command_process_lines<I, S>(name: &str, args: I) -> Result<Vec<String>, String>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
-    F: Fn(String),
 {
     let mut cmd = Command::new(GIT)
         .args(args)
@@ -57,12 +52,14 @@ where
         .spawn()
         .map_err(|e| format!("{e}"))?;
 
+    let mut result: Vec<String> = Vec::new();
+
     if let Some(stdout) = cmd.stdout.as_mut() {
         let lines = BufReader::new(stdout).lines();
         for line in lines {
             match line {
                 Ok(line) => {
-                    process_line(line);
+                    result.push(line);
                 }
                 Err(e) => eprintln!("{e}"),
             }
@@ -72,14 +69,14 @@ where
     cmd.wait()
         .map_err(|e| format!("{e}"))?
         .success()
-        .then(|| ())
+        .then(|| result)
         .ok_or(format!("{name} failed to execute"))
 }
 
 pub fn git_branches() -> Result<HashSet<String>, String> {
-    let mut branches: HashSet<String> = HashSet::new();
-    git_command_process_lines("get branches", vec!["branches"], |b| {
-        branches.insert(String::from(b));
-    })?;
+    let branches: HashSet<String> =
+        git_command_process_lines("get branches", vec!["branch", "--format=%(refname:short)"])?
+            .into_iter()
+            .collect();
     Ok(branches)
 }
