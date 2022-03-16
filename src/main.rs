@@ -99,7 +99,7 @@ fn prune(cmd: &str) -> Result<(), String> {
         if let Some(pruned_branch) = is_pruned_branch(line) {
             if pruned_branch.cmp(&current_branch).is_eq() {
                 eprintln!(
-                    "Cannot delete pruned branch {pruned_branch} because HEAD is pointing to it."
+                    "⚠️ Cannot delete pruned branch {pruned_branch} because HEAD is pointing to it."
                 );
             } else if branches.contains(&pruned_branch) {
                 if let Err(err) = git_command_status(

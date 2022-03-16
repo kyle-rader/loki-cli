@@ -15,7 +15,7 @@ Git is a pretty great tool on it's own. After some time common patterns emerge. 
 ## Get Help
 ```shell
 ❯ lk --help
-loki-cli 0.2.0
+loki-cli 0.3.0
 Kyle W. Rader
 A CLI for Git Productivity
 
@@ -27,9 +27,11 @@ OPTIONS:
     -V, --version    Print version information
 
 SUBCOMMANDS:
-    help    Print this message or the help of the given subcommand(s)
-    new     Create a new branch from HEAD and push it to origin [aliases: n]
-    push    Push the current branch to origin with --set-upstream
+    fetch    Fetch with --prune deleting local branches pruned from the remote
+    help     Print this message or the help of the given subcommand(s)
+    new      Create a new branch from HEAD and push it to origin [aliases: n]
+    pull     Pull with --prune deleting local branches pruned from the remote
+    push     Push the current branch to origin with --set-upstream
 ```
 
 ## Commands
@@ -42,16 +44,19 @@ Alias: `n`
 #### Example
 ```
 ❯ lk new readme updates
-Switched to a new branch 'readme-updates'
-Total 0 (delta 0), reused 0 (delta 0), pack-reused 0
-remote:
-To github.com:kyle-rader/loki-cli.git
- * [new branch]      readme-updates -> readme-updates
-branch 'readme-updates' set up to track 'origin/readme-updates'.
 ```
+Creates and pushes `readme-updates` to origin with `--set-upstream`. (The command git will tell you to run if you simply run `git push` after creating a new local branch.)
 
 ### `push`
 Alias: none
 * Pushes the current branch to origin with `--set-upstream`.
 * `-f|--force` flag uses `--force-with-lease` under the hood for better force push safety.
 * Only works if `HEAD` is on a branch (not in a dettached state).
+
+### `pull`
+Alias: none
+* Run `git pull --prune` and remove any local branches that have also been pruned on the remote.
+
+### `fetch`
+Alias: none
+* Run `git fetch --prune` and remove any local branches that have also been pruned on the remote.
