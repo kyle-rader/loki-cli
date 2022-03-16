@@ -1,10 +1,8 @@
 pub mod git;
 pub mod pruning;
 
-use std::process::Output;
-
 use clap::Parser;
-use git::{git_branches, git_command_output, git_command_process_lines, git_command_status};
+use git::{git_branches, git_command_lines, git_command_status, git_current_branch};
 use pruning::is_pruned_branch;
 
 #[derive(Parser)]
@@ -63,15 +61,7 @@ fn new_branch(name: &Vec<String>) -> Result<(), String> {
 }
 
 fn push_branch(force: bool) -> Result<(), String> {
-    let Output { stdout, .. } = git_command_output(
-        "get current branch",
-        vec!["rev-parse", "--abbrev-ref", "HEAD"],
-    )?;
-
-    let current_branch = match String::from_utf8(stdout) {
-        Ok(value) => String::from(value.trim()),
-        Err(err) => return Err(format!("{}", err)),
-    };
+    let current_branch = git_current_branch()?;
 
     if current_branch.to_ascii_lowercase() == "head" {
         return Err(String::from(
@@ -101,21 +91,26 @@ fn fetch_prune() -> Result<(), String> {
 }
 
 fn prune(cmd: &str) -> Result<(), String> {
+    let current_branch = git_current_branch()?;
     let branches = git_branches()?;
 
-    for line in git_command_process_lines("pull with pruning", vec![cmd, "--prune"])?.into_iter() {
+    for line in git_command_lines("pull with pruning", vec![cmd, "--prune"])?.into_iter() {
         println!("{line}");
         if let Some(pruned_branch) = is_pruned_branch(line) {
-            if branches.contains(&pruned_branch) {
-                match git_command_status(
+            if pruned_branch.cmp(&current_branch).is_eq() {
+                eprintln!(
+                    "Cannot delete pruned branch {pruned_branch} because HEAD is pointing to it."
+                );
+            } else if branches.contains(&pruned_branch) {
+                if let Err(err) = git_command_status(
                     format!("delete branch {pruned_branch}").as_str(),
                     vec!["branch", "-D", pruned_branch.as_str()],
                 ) {
-                    Ok(_) => println!("Deleted pruned branch {pruned_branch}"),
-                    Err(err) => eprintln!("Failed to delete pruned branch {pruned_branch}: {err}"),
+                    eprintln!("Failed to delete pruned branch {pruned_branch}: {err:?}")
                 }
             }
         }
     }
+
     Ok(())
 }

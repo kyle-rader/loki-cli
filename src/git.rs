@@ -1,8 +1,7 @@
 use std::{
     collections::HashSet,
     ffi::OsStr,
-    io::{BufRead, BufReader},
-    process::{Command, Output, Stdio},
+    process::{Command, Output},
 };
 
 const GIT: &str = "git";
@@ -41,42 +40,43 @@ where
     }
 }
 
-pub fn git_command_process_lines<I, S>(name: &str, args: I) -> Result<Vec<String>, String>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<OsStr>,
-{
-    let mut cmd = Command::new(GIT)
-        .args(args)
-        .stdout(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("{e}"))?;
+pub fn git_current_branch() -> Result<String, String> {
+    let Output { stdout, .. } = git_command_output(
+        "get current branch",
+        vec!["rev-parse", "--abbrev-ref", "HEAD"],
+    )?;
 
-    let mut result: Vec<String> = Vec::new();
-
-    if let Some(stdout) = cmd.stdout.as_mut() {
-        let lines = BufReader::new(stdout).lines();
-        for line in lines {
-            match line {
-                Ok(line) => {
-                    result.push(line);
-                }
-                Err(e) => eprintln!("{e}"),
-            }
-        }
+    match String::from_utf8(stdout) {
+        Ok(value) => Ok(String::from(value.trim())),
+        Err(err) => return Err(format!("{}", err)),
     }
-
-    cmd.wait()
-        .map_err(|e| format!("{e}"))?
-        .success()
-        .then(|| result)
-        .ok_or(format!("{name} failed to execute"))
 }
 
 pub fn git_branches() -> Result<HashSet<String>, String> {
     let branches: HashSet<String> =
-        git_command_process_lines("get branches", vec!["branch", "--format=%(refname:short)"])?
+        git_command_lines("get branches", vec!["branch", "--format=%(refname:short)"])?
             .into_iter()
             .collect();
     Ok(branches)
+}
+
+pub fn git_command_lines<I, S>(name: &str, args: I) -> Result<Vec<String>, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let Output { stdout, stderr, .. } = git_command_output(name, args)?;
+
+    let stderr = String::from_utf8(stderr).map_err(|e| format!("{e}"))?;
+    let stdout = String::from_utf8(stdout).map_err(|e| format!("{e}"))?;
+
+    let mut lines: Vec<String> = Vec::new();
+    for l in stderr.lines() {
+        lines.push(String::from(l));
+    }
+    for l in stdout.lines() {
+        lines.push(String::from(l));
+    }
+
+    Ok(lines)
 }
