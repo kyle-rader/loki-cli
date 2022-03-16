@@ -41,14 +41,15 @@ where
     }
 }
 
-pub fn git_command_process_lines<I, S>(
+pub fn git_command_process_lines<I, S, F>(
     name: &str,
     args: I,
-    process_line: fn(&String),
+    process_line: F,
 ) -> Result<(), String>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
+    F: Fn(String),
 {
     let mut cmd = Command::new(GIT)
         .args(args)
@@ -61,7 +62,7 @@ where
         for line in lines {
             match line {
                 Ok(line) => {
-                    process_line(&line);
+                    process_line(line);
                 }
                 Err(e) => eprintln!("{e}"),
             }
@@ -77,6 +78,8 @@ where
 
 pub fn git_branches() -> Result<HashSet<String>, String> {
     let mut branches: HashSet<String> = HashSet::new();
-
+    git_command_process_lines("get branches", vec!["branches"], |b| {
+        branches.insert(String::from(b));
+    })?;
     Ok(branches)
 }

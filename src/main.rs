@@ -4,7 +4,7 @@ pub mod pruning;
 use std::process::Output;
 
 use clap::Parser;
-use git::{git_command_output, git_command_status};
+use git::{git_branches, git_command_output, git_command_status};
 
 #[derive(Parser)]
 #[clap(version, about, author)]
@@ -33,12 +33,11 @@ fn main() -> Result<(), String> {
     let cli = Cli::parse();
 
     match &cli {
-        Cli::New { name } => new_branch(name)?,
-        Cli::Push { force } => push_branch(*force)?,
-        Cli::Pull => todo!(),
-        Cli::Fetch => todo!(),
+        Cli::New { name } => new_branch(name),
+        Cli::Push { force } => push_branch(*force),
+        Cli::Pull => pull_prune(),
+        Cli::Fetch => fetch_prune(),
     }
-    Ok(())
 }
 
 fn new_branch(name: &Vec<String>) -> Result<(), String> {
@@ -89,5 +88,18 @@ fn push_branch(force: bool) -> Result<(), String> {
 
     git_command_status("push", args)?;
 
+    Ok(())
+}
+
+fn pull_prune() -> Result<(), String> {
+    let branches = git_branches()?;
+
+    for b in branches.iter() {
+        println!("branch: {}", b);
+    }
+    Ok(())
+}
+
+fn fetch_prune() -> Result<(), String> {
     Ok(())
 }
