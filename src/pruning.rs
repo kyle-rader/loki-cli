@@ -1,38 +1,28 @@
-use std::ops::Index;
-
-#[derive(Debug, PartialEq)]
-pub enum FetchLine {
-    Pruned(String),
-    NotPruned,
-}
-
 const ORIGIN: &str = "origin/";
 const DELETED: &str = " - [deleted]";
 
-impl From<String> for FetchLine {
-    fn from(s: String) -> Self {
-        if s.starts_with(DELETED) {
-            match s.find(ORIGIN) {
-                Some(ix) => FetchLine::Pruned(String::from(&s[ix + ORIGIN.len()..])),
-                None => FetchLine::NotPruned,
-            }
-        } else {
-            FetchLine::NotPruned
+pub fn is_pruned_branch(s: String) -> Option<String> {
+    if s.starts_with(DELETED) {
+        match s.find(ORIGIN) {
+            Some(ix) => Some(String::from(&s[ix + ORIGIN.len()..])),
+            None => None,
         }
+    } else {
+        None
     }
 }
 
 #[cfg(test)]
 mod prune_tests {
-    use super::FetchLine;
+    use super::*;
     use test_case::test_case;
 
     #[test]
     fn from_pruned_line() {
-        let subject: FetchLine = FetchLine::from(String::from(
+        let subject = is_pruned_branch(String::from(
             " - [deleted]         (none)     -> origin/command-push",
         ));
-        assert_eq!(subject, FetchLine::Pruned(String::from("command-push")));
+        assert_eq!(subject, Some(String::from("command-push")));
     }
 
     #[test_case("remote: Enumerating objects: 81, done.")]
@@ -45,7 +35,7 @@ mod prune_tests {
     #[test_case(" * [new tag]         loki-cli-0.2.0 -> loki-cli-0.2.0")]
     fn from_not_pruned(input: &str) {
         let line = String::from(input);
-        let subject = FetchLine::from(line);
-        assert_eq!(subject, FetchLine::NotPruned);
+        let subject = is_pruned_branch(line);
+        assert_eq!(subject, None);
     }
 }
