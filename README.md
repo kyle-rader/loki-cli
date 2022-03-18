@@ -29,7 +29,8 @@ OPTIONS:
 SUBCOMMANDS:
     fetch    Fetch with --prune deleting local branches pruned from the remote
     help     Print this message or the help of the given subcommand(s)
-    new      Create a new branch from HEAD and push it to origin [aliases: n]
+    new      Create a new branch from HEAD and push it to origin. Set a prefix for all new
+                 branch names with the env var LOKI_NEW_PREFIX [aliases: n]
     pull     Pull with --prune deleting local branches pruned from the remote
     push     Push the current branch to origin with --set-upstream
 ```
@@ -40,6 +41,7 @@ SUBCOMMANDS:
 Alias: `n`
 * Make creating a new branch easier to type by joining all given args with a dash (`-`).
 * Automatically push and setup tracking to `origin`.
+* Set a prefix to always prepend with the `LOKI_NEW_PREFIX` environment variable.
 
 #### Example
 ```

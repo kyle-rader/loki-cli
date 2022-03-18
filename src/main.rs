@@ -9,6 +9,7 @@ use pruning::is_pruned_branch;
 #[clap(version, about, author)]
 enum Cli {
     /// Create a new branch from HEAD and push it to origin.
+    /// Set a prefix for all new branch names with the env var LOKI_NEW_PREFIX
     #[clap(visible_alias = "n")]
     New {
         /// List of names to join with dashes to form a valid branch name.
