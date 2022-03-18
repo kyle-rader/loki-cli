@@ -39,12 +39,19 @@ fn main() -> Result<(), String> {
     }
 }
 
+const LOKI_NEW_PREFIX: &str = "LOKI_NEW_PREFIX";
+
 fn new_branch(name: &Vec<String>) -> Result<(), String> {
     if name.len() == 0 {
         return Err(String::from("name cannot be empty."));
     }
 
-    let name = name.join("-");
+    let mut name = name.join("-");
+
+    if let Ok(prefix) = std::env::var(LOKI_NEW_PREFIX) {
+        eprintln!("Using prefix from env var {LOKI_NEW_PREFIX}={prefix}");
+        name = format!("{prefix}{name}");
+    }
 
     git::git_commands_status(vec![
         (
