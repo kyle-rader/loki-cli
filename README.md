@@ -13,9 +13,8 @@ Git is a pretty great tool on it's own. After some time common patterns emerge. 
 
 # Use
 ## Get Help
-```shell
-❯ lk --help
-loki-cli 0.3.0
+```
+loki-cli 0.5.0
 Kyle W. Rader
 A CLI for Git Productivity
 
@@ -32,7 +31,7 @@ SUBCOMMANDS:
     new      Create a new branch from HEAD and push it to origin. Set a prefix for all new
                  branch names with the env var LOKI_NEW_PREFIX [aliases: n]
     pull     Pull with --prune deleting local branches pruned from the remote
-    push     Push the current branch to origin with --set-upstream
+    push     Push the current branch to origin with --set-upstream [aliases: p]
 ```
 
 ## Commands
@@ -50,13 +49,13 @@ Alias: `n`
 Creates and pushes `readme-updates` to origin with `--set-upstream`. (The command git will tell you to run if you simply run `git push` after creating a new local branch.)
 
 ### `push`
-Alias: none
+Alias: `p`
 * Pushes the current branch to origin with `--set-upstream`.
 * `-f|--force` flag uses `--force-with-lease` under the hood for better force push safety.
 * Only works if `HEAD` is on a branch (not in a dettached state).
 
 ### `pull`
-Alias: none
+Alias: none (the alias `p` is for `push`)
 * Run `git pull --prune` and remove any local branches that have also been pruned on the remote.
 
 ### `fetch`
