@@ -17,6 +17,7 @@ enum Cli {
     },
 
     /// Push the current branch to origin with --set-upstream
+    #[clap(visible_alias = "p")]
     Push {
         /// Use --force-with-lease
         #[clap(short, long)]
