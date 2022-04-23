@@ -1,5 +1,7 @@
 # `loki-cli` A Git Productivity CLI
 
+[![Cargo Test](https://github.com/kyle-rader/loki-cli/actions/workflows/pr-build.yml/badge.svg)](https://github.com/kyle-rader/loki-cli/actions/workflows/pr-build.yml)
+
 Git is a pretty great tool on it's own. After some time common patterns emerge. `lk` is here to make those patterns fast.
 
 # Install
