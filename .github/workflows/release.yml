@@ -15,7 +15,7 @@ jobs:
       cr_package: "https://github.com/crate-ci/cargo-release/releases/download/v0.20.3/cargo-release-v0.20.3-x86_64-unknown-linux-gnu.tar.gz"
     steps:
       - uses: actions/checkout@v2
-      - name: Install latest nightly
+      - name: Install Rust Toolchain
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
