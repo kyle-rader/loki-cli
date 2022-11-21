@@ -33,9 +33,11 @@ enum Cli {
     Fetch,
     /// Add, commit, and push using a timestamp based commit message.
     Save {
-        /// Include all untracked (new) files
+        /// Include all untracked (new) files.
         #[clap(short, long)]
         all: bool,
+        /// Optional message to include. Each MESSAGE will be joined on whitespace and appended after timestamp.
+        message: Vec<String>,
     },
 }
 
@@ -49,11 +51,11 @@ fn main() -> Result<(), String> {
         Cli::Push { force } => push_branch(*force),
         Cli::Pull => pull_prune(),
         Cli::Fetch => fetch_prune(),
-        Cli::Save { all } => save(*all),
+        Cli::Save { all, message } => save(*all, message),
     }
 }
 
-fn save(all: bool) -> Result<(), String> {
+fn save(all: bool, message: &Vec<String>) -> Result<(), String> {
     let Ok(now) = OffsetDateTime::now_local() else { return Err(String::from("could not get current time"))};
     let selector_option = match all {
         true => "--all",
@@ -64,7 +66,11 @@ fn save(all: bool) -> Result<(), String> {
         ("add files", vec!["add", selector_option]),
         (
             "commit",
-            vec!["commit", "--message", format!("lk save: {now}").as_str()],
+            vec![
+                "commit",
+                "--message",
+                format!("lk save: {now} {}", message.join(" ")).as_str(),
+            ],
         ),
         ("push", vec!["push"]),
     ])?;
