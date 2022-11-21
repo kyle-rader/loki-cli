@@ -69,7 +69,7 @@ fn save(all: bool, message: &Vec<String>) -> Result<(), String> {
             vec![
                 "commit",
                 "--message",
-                format!("lk save: {now} {}", message.join(" ")).as_str(),
+                format!("lk save [{now}] | {}", message.join(" ")).as_str(),
             ],
         ),
         ("push", vec!["push"]),
