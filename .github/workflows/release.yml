@@ -17,6 +17,8 @@ jobs:
       - uses: actions/checkout@v2
       - name: Install latest nightly
         uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
       - name: Install cargo-release
         run: |
           export cr_dir=$RUNNER_TEMP/$cr_dir
