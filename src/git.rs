@@ -6,6 +6,7 @@ use std::{
 
 const GIT: &str = "git";
 
+/// Execute the git command returning an error if it fails. No redirection is done.
 pub fn git_command_status<I, S>(name: &str, args: I) -> Result<(), String>
 where
     I: IntoIterator<Item = S>,
@@ -17,6 +18,7 @@ where
     Ok(())
 }
 
+/// Execute the list of git commands in order, returning on the first failure. No redirection is done.
 pub fn git_commands_status<C, I, S>(commands: C) -> Result<(), String>
 where
     C: IntoIterator<Item = (&'static str, I)>,

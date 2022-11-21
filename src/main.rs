@@ -2,8 +2,11 @@ pub mod git;
 pub mod pruning;
 
 use clap::Parser;
-use git::{git_branches, git_command_lines, git_command_status, git_current_branch};
+use git::{
+    git_branches, git_command_lines, git_command_status, git_commands_status, git_current_branch,
+};
 use pruning::is_pruned_branch;
+use time::OffsetDateTime;
 
 #[derive(Parser)]
 #[clap(version, about, author)]
@@ -28,7 +31,15 @@ enum Cli {
     Pull,
     /// Fetch with --prune deleting local branches pruned from the remote.
     Fetch,
+    /// Add, commit, and push using a timestamp based commit message.
+    Save {
+        /// Include all untracked (new) files
+        #[clap(short, long)]
+        all: bool,
+    },
 }
+
+const LOKI_NEW_PREFIX: &str = "LOKI_NEW_PREFIX";
 
 fn main() -> Result<(), String> {
     let cli = Cli::parse();
@@ -38,10 +49,28 @@ fn main() -> Result<(), String> {
         Cli::Push { force } => push_branch(*force),
         Cli::Pull => pull_prune(),
         Cli::Fetch => fetch_prune(),
+        Cli::Save { all } => save(*all),
     }
 }
 
-const LOKI_NEW_PREFIX: &str = "LOKI_NEW_PREFIX";
+fn save(all: bool) -> Result<(), String> {
+    let Ok(now) = OffsetDateTime::now_local() else { return Err(String::from("could not get current time"))};
+    let selector_option = match all {
+        true => "--all",
+        false => "--update",
+    };
+
+    git_commands_status(vec![
+        ("add files", vec!["add", selector_option]),
+        (
+            "commit",
+            vec!["commit", "--message", format!("lk save: {now}").as_str()],
+        ),
+        ("push", vec!["push"]),
+    ])?;
+
+    Ok(())
+}
 
 fn new_branch(name: &Vec<String>) -> Result<(), String> {
     if name.len() == 0 {
