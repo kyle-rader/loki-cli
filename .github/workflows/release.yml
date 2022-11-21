@@ -14,29 +14,29 @@ jobs:
       cr_dir: cr
       cr_package: "https://github.com/crate-ci/cargo-release/releases/download/v0.20.3/cargo-release-v0.20.3-x86_64-unknown-linux-gnu.tar.gz"
     steps:
-    - uses: actions/checkout@v2
-    - name: Install latest nightly
+      - uses: actions/checkout@v2
+      - name: Install latest nightly
         uses: actions-rs/toolchain@v1
-    - name: Install cargo-release
-      run: |
-        export cr_dir=$RUNNER_TEMP/$cr_dir
-        mkdir -p $cr_dir
-        pushd $cr_dir
-        curl -L $cr_package -o cr.tar.gz
-        tar -xzf cr.tar.gz
-        popd
-    - name: Release
-      env:
-        CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        # Prep auth for pushing tags
-        remote_repo="https://${GITHUB_ACTOR}:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-        git config http.sslVerify false
-        git config --local user.email kylewrader@gmail.com
-        git config --local user.name ${GITHUB_ACTOR}
-        git remote set-url origin $remote_repo
+      - name: Install cargo-release
+        run: |
+          export cr_dir=$RUNNER_TEMP/$cr_dir
+          mkdir -p $cr_dir
+          pushd $cr_dir
+          curl -L $cr_package -o cr.tar.gz
+          tar -xzf cr.tar.gz
+          popd
+      - name: Release
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Prep auth for pushing tags
+          remote_repo="https://${GITHUB_ACTOR}:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git config http.sslVerify false
+          git config --local user.email kylewrader@gmail.com
+          git config --local user.name ${GITHUB_ACTOR}
+          git remote set-url origin $remote_repo
 
-        # Run Cargo Release
-        export cr_dir=$RUNNER_TEMP/$cr_dir
-        $cr_dir/$cr release --config release.toml --execute --no-confirm
+          # Run Cargo Release
+          export cr_dir=$RUNNER_TEMP/$cr_dir
+          $cr_dir/$cr release --config release.toml --execute --no-confirm
