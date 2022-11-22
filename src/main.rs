@@ -6,7 +6,6 @@ use git::{
     git_branches, git_command_lines, git_command_status, git_commands_status, git_current_branch,
 };
 use pruning::is_pruned_branch;
-use time::OffsetDateTime;
 
 #[derive(Parser)]
 #[clap(version, about, author)]
@@ -56,21 +55,20 @@ fn main() -> Result<(), String> {
 }
 
 fn save(all: bool, message: &Vec<String>) -> Result<(), String> {
-    let Ok(now) = OffsetDateTime::now_local() else { return Err(String::from("could not get current time"))};
-    let selector_option = match all {
-        true => "--all",
-        false => "--update",
+    let selector_option = if all { "--all" } else { "--update" };
+
+    let message = if message.is_empty() {
+        String::from("")
+    } else {
+        // leading space important for the format of the message below.
+        format!(" {}", message.join(" "))
     };
 
     git_commands_status(vec![
         ("add files", vec!["add", selector_option]),
         (
             "commit",
-            vec![
-                "commit",
-                "--message",
-                format!("lk save [{now}] {}", message.join(" ")).as_str(),
-            ],
+            vec!["commit", "--message", format!("lk save{message}").as_str()],
         ),
         ("push", vec!["push"]),
     ])?;

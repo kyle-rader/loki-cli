@@ -19,7 +19,6 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "3.1.6", features = ["derive"] }
-time = { version = "0.3.17", features = ["local-offset"] }
 
 [dev-dependencies]
 test-case = "2.0.0"
