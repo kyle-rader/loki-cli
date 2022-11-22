@@ -58,18 +58,15 @@ fn save(all: bool, message: &Vec<String>) -> Result<(), String> {
     let selector_option = if all { "--all" } else { "--update" };
 
     let message = if message.is_empty() {
-        String::from("")
+        String::from("lk save")
     } else {
         // leading space important for the format of the message below.
-        format!(": {}", message.join(" "))
+        message.join(" ")
     };
 
     git_commands_status(vec![
         ("add files", vec!["add", selector_option]),
-        (
-            "commit",
-            vec!["commit", "--message", format!("lk save{message}").as_str()],
-        ),
+        ("commit", vec!["commit", "--message", message.as_str()]),
         ("push", vec!["push"]),
     ])?;
 
