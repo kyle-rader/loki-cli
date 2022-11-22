@@ -61,7 +61,7 @@ fn save(all: bool, message: &Vec<String>) -> Result<(), String> {
         String::from("")
     } else {
         // leading space important for the format of the message below.
-        format!(" {}", message.join(" "))
+        format!(": {}", message.join(" "))
     };
 
     git_commands_status(vec![
