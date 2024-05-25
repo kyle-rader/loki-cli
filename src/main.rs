@@ -14,7 +14,7 @@ fn styles() -> clap::builder::Styles {
     Styles::styled()
         .header(AnsiColor::Yellow.on_default())
         .usage(AnsiColor::Green.on_default())
-        .literal(AnsiColor::Green.on_default())
+        .literal(AnsiColor::Magenta.on_default())
         .placeholder(AnsiColor::Cyan.on_default())
 }
 
