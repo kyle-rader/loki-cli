@@ -202,7 +202,7 @@ fn prune(cmd: &str) -> Result<(), String> {
                 );
             } else if branches.contains(&pruned_branch) {
                 if let Err(err) = git_command_status(
-                    format!("delete branch {pruned_branch}").as_str(),
+                    format!("💣 delete branch {pruned_branch}").as_str(),
                     vec!["branch", "-D", pruned_branch.as_str()],
                 ) {
                     eprintln!("Failed to delete pruned branch {pruned_branch}: {err:?}")
