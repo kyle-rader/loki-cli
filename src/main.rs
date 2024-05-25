@@ -1,6 +1,8 @@
 pub mod git;
 pub mod pruning;
 
+use std::vec;
+
 use clap::{
     builder::{styling::AnsiColor, Styles},
     Parser,
@@ -58,6 +60,13 @@ enum Cli {
         #[clap(default_value = "main", env = "LOKI_REBASE_TARGET")]
         target: String,
     },
+
+    /// Run any command without triggering any hooks
+    #[clap(visible_alias = "x")]
+    NoHooks {
+        /// The command to run.
+        command: Vec<String>,
+    },
 }
 
 const LOKI_NEW_PREFIX: &str = "LOKI_NEW_PREFIX";
@@ -72,7 +81,25 @@ fn main() -> Result<(), String> {
         Cli::Fetch => fetch_prune(),
         Cli::Save { all, message } => save(*all, message),
         Cli::Rebase { target } => rebase(target),
+        Cli::NoHooks { command } => no_hooks(command),
     }
+}
+
+fn no_hooks(command: &[impl AsRef<str>]) -> Result<(), String> {
+    if command.is_empty() {
+        return Err(String::from("command cannot be empty."));
+    }
+
+    let no_hook_args = [String::from("-c"), String::from(NO_HOOKS)];
+    // create iter from no_hook_args and command
+    let args = no_hook_args
+        .iter()
+        .map(|s| s.as_ref())
+        .chain(command.iter().map(|s| s.as_ref()));
+
+    git_command_status("run command without hooks", args)?;
+
+    Ok(())
 }
 
 fn rebase(target: &str) -> Result<(), String> {
