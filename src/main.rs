@@ -49,6 +49,13 @@ enum Cli {
         /// Optional message to include. Each MESSAGE will be joined on whitespace and appended after timestamp.
         message: Vec<String>,
     },
+
+    /// Rebase the current branch onto the target branch after fetching.
+    Rebase {
+        /// The branch to rebase onto.
+        #[clap(default_value = "main", env = "LOKI_REBASE_TARGET")]
+        target: String,
+    },
 }
 
 const LOKI_NEW_PREFIX: &str = "LOKI_NEW_PREFIX";
@@ -62,7 +69,19 @@ fn main() -> Result<(), String> {
         Cli::Pull => pull_prune(),
         Cli::Fetch => fetch_prune(),
         Cli::Save { all, message } => save(*all, message),
+        Cli::Rebase { target } => rebase(target),
     }
+}
+
+fn rebase(target: &str) -> Result<(), String> {
+    let current_branch = git_current_branch()?;
+
+    git_commands_status(vec![
+        ("fetch target", vec!["fetch"]),
+        ("rebase", vec!["rebase", target]),
+    ])?;
+
+    Ok(())
 }
 
 fn save(all: bool, message: &[String]) -> Result<(), String> {
