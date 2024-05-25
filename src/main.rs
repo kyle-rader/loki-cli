@@ -212,6 +212,8 @@ fn prune(cmd: &str) -> Result<(), String> {
                     vec!["branch", "-D", pruned_branch.as_str()],
                 ) {
                     eprintln!("Failed to delete pruned branch {pruned_branch}: {err:?}")
+                } else {
+                    println!("💣 deleted local pruned branch {pruned_branch}");
                 }
             }
         }
