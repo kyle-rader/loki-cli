@@ -1,14 +1,29 @@
 pub mod git;
 pub mod pruning;
 
-use clap::Parser;
+use std::vec;
+
+use clap::{
+    builder::{styling::AnsiColor, Styles},
+    Parser,
+};
 use git::{
     git_branches, git_command_lines, git_command_status, git_commands_status, git_current_branch,
 };
 use pruning::is_pruned_branch;
 
+fn styles() -> clap::builder::Styles {
+    Styles::styled()
+        .header(AnsiColor::Yellow.on_default())
+        .usage(AnsiColor::Green.on_default())
+        .literal(AnsiColor::Magenta.on_default())
+        .placeholder(AnsiColor::Cyan.on_default())
+}
+
+const NO_HOOKS: &str = "core.hooksPath=/dev/null";
+
 #[derive(Parser)]
-#[clap(version, about, author)]
+#[clap(version, about, author, color = clap::ColorChoice::Auto, styles = styles())]
 enum Cli {
     /// Create a new branch from HEAD and push it to origin.
     /// Set a prefix for all new branch names with the env var LOKI_NEW_PREFIX
@@ -38,6 +53,20 @@ enum Cli {
         /// Optional message to include. Each MESSAGE will be joined on whitespace and appended after timestamp.
         message: Vec<String>,
     },
+
+    /// Rebase the current branch onto the target branch after fetching.
+    Rebase {
+        /// The branch to rebase onto.
+        #[clap(default_value = "main", env = "LOKI_REBASE_TARGET")]
+        target: String,
+    },
+
+    /// Run any command without triggering any hooks
+    #[clap(visible_alias = "x")]
+    NoHooks {
+        /// The command to run.
+        command: Vec<String>,
+    },
 }
 
 const LOKI_NEW_PREFIX: &str = "LOKI_NEW_PREFIX";
@@ -51,10 +80,41 @@ fn main() -> Result<(), String> {
         Cli::Pull => pull_prune(),
         Cli::Fetch => fetch_prune(),
         Cli::Save { all, message } => save(*all, message),
+        Cli::Rebase { target } => rebase(target),
+        Cli::NoHooks { command } => no_hooks(command),
     }
 }
 
-fn save(all: bool, message: &Vec<String>) -> Result<(), String> {
+fn no_hooks(command: &[impl AsRef<str>]) -> Result<(), String> {
+    if command.is_empty() {
+        return Err(String::from("command cannot be empty."));
+    }
+
+    let no_hook_args = [String::from("-c"), String::from(NO_HOOKS)];
+    // create iter from no_hook_args and command
+    let args = no_hook_args
+        .iter()
+        .map(|s| s.as_ref())
+        .chain(command.iter().map(|s| s.as_ref()));
+
+    git_command_status("run command without hooks", args)?;
+
+    Ok(())
+}
+
+fn rebase(target: &str) -> Result<(), String> {
+    git_commands_status(vec![
+        (
+            "fetch target",
+            vec!["-c", NO_HOOKS, "fetch", "origin", target],
+        ),
+        ("rebase", vec!["-c", NO_HOOKS, "rebase", target]),
+    ])?;
+
+    Ok(())
+}
+
+fn save(all: bool, message: &[String]) -> Result<(), String> {
     let selector_option = if all { "--all" } else { "--update" };
 
     let message = if message.is_empty() {
@@ -73,8 +133,8 @@ fn save(all: bool, message: &Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
-fn new_branch(name: &Vec<String>) -> Result<(), String> {
-    if name.len() == 0 {
+fn new_branch(name: &[String]) -> Result<(), String> {
+    if name.is_empty() {
         return Err(String::from("name cannot be empty."));
     }
 

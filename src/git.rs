@@ -27,8 +27,7 @@ where
 {
     commands
         .into_iter()
-        .map(|(name, cmd)| git_command_status(name, cmd))
-        .collect()
+        .try_for_each(|(name, cmd)| git_command_status(name, cmd))
 }
 
 pub fn git_command_output<I, S>(name: &str, args: I) -> Result<Output, String>
@@ -50,7 +49,7 @@ pub fn git_current_branch() -> Result<String, String> {
 
     match String::from_utf8(stdout) {
         Ok(value) => Ok(String::from(value.trim())),
-        Err(err) => return Err(format!("{}", err)),
+        Err(err) => Err(format!("{}", err)),
     }
 }
 
