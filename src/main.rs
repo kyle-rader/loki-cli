@@ -1,14 +1,25 @@
 pub mod git;
 pub mod pruning;
 
-use clap::Parser;
+use clap::{
+    builder::{styling::AnsiColor, Styles},
+    Parser,
+};
 use git::{
     git_branches, git_command_lines, git_command_status, git_commands_status, git_current_branch,
 };
 use pruning::is_pruned_branch;
 
+fn styles() -> clap::builder::Styles {
+    Styles::styled()
+        .header(AnsiColor::Yellow.on_default())
+        .usage(AnsiColor::Green.on_default())
+        .literal(AnsiColor::Green.on_default())
+        .placeholder(AnsiColor::Cyan.on_default())
+}
+
 #[derive(Parser)]
-#[clap(version, about, author)]
+#[clap(version, about, author, color = clap::ColorChoice::Auto, styles = styles())]
 enum Cli {
     /// Create a new branch from HEAD and push it to origin.
     /// Set a prefix for all new branch names with the env var LOKI_NEW_PREFIX
@@ -54,7 +65,7 @@ fn main() -> Result<(), String> {
     }
 }
 
-fn save(all: bool, message: &Vec<String>) -> Result<(), String> {
+fn save(all: bool, message: &[String]) -> Result<(), String> {
     let selector_option = if all { "--all" } else { "--update" };
 
     let message = if message.is_empty() {
@@ -73,8 +84,8 @@ fn save(all: bool, message: &Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
-fn new_branch(name: &Vec<String>) -> Result<(), String> {
-    if name.len() == 0 {
+fn new_branch(name: &[String]) -> Result<(), String> {
+    if name.is_empty() {
         return Err(String::from("name cannot be empty."));
     }
 

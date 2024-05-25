@@ -2,14 +2,10 @@ const ORIGIN: &str = "origin/";
 const DELETED: &str = " - [deleted]";
 
 pub fn is_pruned_branch(s: String) -> Option<String> {
-    if s.starts_with(DELETED) {
-        match s.find(ORIGIN) {
-            Some(ix) => Some(String::from(&s[ix + ORIGIN.len()..])),
-            None => None,
-        }
-    } else {
-        None
-    }
+    s.starts_with(DELETED)
+        .then(|| s.find(ORIGIN))
+        .flatten()
+        .map(|ix| String::from(&s[ix + ORIGIN.len()..]))
 }
 
 #[cfg(test)]
