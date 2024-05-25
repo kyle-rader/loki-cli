@@ -18,6 +18,8 @@ fn styles() -> clap::builder::Styles {
         .placeholder(AnsiColor::Cyan.on_default())
 }
 
+const NO_HOOKS: &str = "core.hooksPath=/dev/null";
+
 #[derive(Parser)]
 #[clap(version, about, author, color = clap::ColorChoice::Auto, styles = styles())]
 enum Cli {
@@ -74,11 +76,12 @@ fn main() -> Result<(), String> {
 }
 
 fn rebase(target: &str) -> Result<(), String> {
-    let current_branch = git_current_branch()?;
-
     git_commands_status(vec![
-        ("fetch target", vec!["fetch"]),
-        ("rebase", vec!["rebase", target]),
+        (
+            "fetch target",
+            vec!["-c", NO_HOOKS, "fetch", "origin", target],
+        ),
+        ("rebase", vec!["-c", NO_HOOKS, "rebase", target]),
     ])?;
 
     Ok(())
