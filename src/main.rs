@@ -106,7 +106,13 @@ fn rebase(target: &str) -> Result<(), String> {
     git_commands_status(vec![
         (
             "fetch target",
-            vec!["-c", NO_HOOKS, "fetch", "origin", target],
+            vec![
+                "-c",
+                NO_HOOKS,
+                "fetch",
+                "origin",
+                format!("{target}:{target}").as_str(),
+            ],
         ),
         ("rebase", vec!["-c", NO_HOOKS, "rebase", target]),
     ])?;

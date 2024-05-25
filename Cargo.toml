@@ -1,6 +1,6 @@
 [package]
 name = "loki-cli"
-version = "0.7.0"
+version = "0.7.1"
 authors = ["Kyle W. Rader"]
 description = "Loki: 🚀 A Git productivity tool"
 homepage = "https://github.com/kyle-rader/loki-cli"
