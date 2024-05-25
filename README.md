@@ -16,24 +16,23 @@ Git is a pretty great tool on it's own. After some time common patterns emerge. 
 # Use
 ## Get Help
 ```
-loki-cli 0.5.0
-Kyle W. Rader
-A CLI for Git Productivity
+Loki: 🚀 A Git productivity tool
 
-USAGE:
-    lk.exe <SUBCOMMAND>
+Usage: lk <COMMAND>
 
-OPTIONS:
-    -h, --help       Print help information
-    -V, --version    Print version information
+Commands:
+  new       Create a new branch from HEAD and push it to origin. Set a prefix for all new branch names with the env var LOKI_NEW_PREFIX [aliases: n]
+  push      Push the current branch to origin with --set-upstream [aliases: p]
+  pull      Pull with --prune deleting local branches pruned from the remote
+  fetch     Fetch with --prune deleting local branches pruned from the remote
+  save      Add, commit, and push using a timestamp based commit message
+  rebase    Rebase the current branch onto the target branch after fetching
+  no-hooks  Run any command without triggering any hooks [aliases: x]
+  help      Print this message or the help of the given subcommand(s)
 
-SUBCOMMANDS:
-    fetch    Fetch with --prune deleting local branches pruned from the remote
-    help     Print this message or the help of the given subcommand(s)
-    new      Create a new branch from HEAD and push it to origin. Set a prefix for all new
-                 branch names with the env var LOKI_NEW_PREFIX [aliases: n]
-    pull     Pull with --prune deleting local branches pruned from the remote
-    push     Push the current branch to origin with --set-upstream [aliases: p]
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
 ```
 
 ## Commands
