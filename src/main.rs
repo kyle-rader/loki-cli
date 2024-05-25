@@ -213,7 +213,7 @@ fn prune(cmd: &str) -> Result<(), String> {
                 ) {
                     eprintln!("Failed to delete pruned branch {pruned_branch}: {err:?}")
                 } else {
-                    println!("💣      local   {pruned_branch} (pruned from remote)");
+                    println!("💣      local  {pruned_branch} (pruned from remote)");
                 }
             }
         }
