@@ -20,7 +20,9 @@ fn styles() -> clap::builder::Styles {
         .placeholder(AnsiColor::Cyan.on_default())
 }
 
+const LOKI_NEW_PREFIX: &str = "LOKI_NEW_PREFIX";
 const NO_HOOKS: &str = "core.hooksPath=/dev/null";
+const NO_HOOKS_ARGS: [&str; 2] = ["-c", NO_HOOKS];
 
 #[derive(Debug, Parser)]
 struct CommitOptions {
@@ -78,8 +80,6 @@ enum Cli {
     },
 }
 
-const LOKI_NEW_PREFIX: &str = "LOKI_NEW_PREFIX";
-
 fn main() -> Result<(), String> {
     let cli = Cli::parse();
 
@@ -95,17 +95,20 @@ fn main() -> Result<(), String> {
     }
 }
 
+fn without_hooks(command: &[impl AsRef<str>]) -> impl Iterator<Item = &str> {
+    // create iter from no_hook_args and command
+    NO_HOOKS_ARGS
+        .iter()
+        .copied()
+        .chain(command.iter().map(|s| s.as_ref()))
+}
+
 fn no_hooks(command: &[impl AsRef<str>]) -> Result<(), String> {
     if command.is_empty() {
         return Err(String::from("command cannot be empty."));
     }
 
-    let no_hook_args = [String::from("-c"), String::from(NO_HOOKS)];
-    // create iter from no_hook_args and command
-    let args = no_hook_args
-        .iter()
-        .map(|s| s.as_ref())
-        .chain(command.iter().map(|s| s.as_ref()));
+    let args = without_hooks(command);
 
     git_command_status("run command without hooks", args)?;
 
