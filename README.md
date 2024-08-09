@@ -87,5 +87,5 @@ Execute a git commit without running any hooks
 #### Example
 
 ```sh
-lk x commit -m "Commit without any hooks"
+lk x -- commit -m "Update Readme without running hooks"
 ```
