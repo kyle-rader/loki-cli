@@ -22,6 +22,14 @@ fn styles() -> clap::builder::Styles {
 
 const NO_HOOKS: &str = "core.hooksPath=/dev/null";
 
+#[derive(Debug, Parser)]
+struct CommitOptions {
+    #[clap(short, long)]
+    all: bool,
+    /// Optional message to include. Each MESSAGE will be joined on whitespace.
+    message: Vec<String>,
+}
+
 #[derive(Parser)]
 #[clap(version, about, author, color = clap::ColorChoice::Auto, styles = styles())]
 enum Cli {
@@ -43,16 +51,17 @@ enum Cli {
 
     /// Pull with --prune deleting local branches pruned from the remote.
     Pull,
+
     /// Fetch with --prune deleting local branches pruned from the remote.
     Fetch,
+
     /// Add, commit, and push using a timestamp based commit message.
-    Save {
-        /// Include all untracked (new) files.
-        #[clap(short, long)]
-        all: bool,
-        /// Optional message to include. Each MESSAGE will be joined on whitespace and appended after timestamp.
-        message: Vec<String>,
-    },
+    #[clap(visible_alias = "s")]
+    Save(CommitOptions),
+
+    /// Commit local changes
+    #[clap(visible_alias = "c")]
+    Commit(CommitOptions),
 
     /// Rebase the current branch onto the target branch after fetching.
     Rebase {
@@ -79,7 +88,8 @@ fn main() -> Result<(), String> {
         Cli::Push { force } => push_branch(*force),
         Cli::Pull => pull_prune(),
         Cli::Fetch => fetch_prune(),
-        Cli::Save { all, message } => save(*all, message),
+        Cli::Save(CommitOptions { all, message }) => save(*all, message),
+        Cli::Commit(CommitOptions { all, message }) => commit(*all, message),
         Cli::Rebase { target } => rebase(target),
         Cli::NoHooks { command } => no_hooks(command),
     }
@@ -121,10 +131,16 @@ fn rebase(target: &str) -> Result<(), String> {
 }
 
 fn save(all: bool, message: &[String]) -> Result<(), String> {
+    commit(all, message)?;
+    push_branch(false)?;
+    Ok(())
+}
+
+fn commit(all: bool, message: &[String]) -> Result<(), String> {
     let selector_option = if all { "--all" } else { "--update" };
 
     let message = if message.is_empty() {
-        String::from("lk save")
+        String::from("lk commit")
     } else {
         // leading space important for the format of the message below.
         message.join(" ")
@@ -133,7 +149,6 @@ fn save(all: bool, message: &[String]) -> Result<(), String> {
     git_commands_status(vec![
         ("add files", vec!["add", selector_option]),
         ("commit", vec!["commit", "--message", message.as_str()]),
-        ("push", vec!["push"]),
     ])?;
 
     Ok(())
