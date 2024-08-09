@@ -16,6 +16,7 @@ Git is a pretty great tool on it's own. After some time common patterns emerge. 
 # Use
 ## Get Help
 ```
+lk -h
 Loki: 🚀 A Git productivity tool
 
 Usage: lk <COMMAND>
@@ -25,7 +26,8 @@ Commands:
   push      Push the current branch to origin with --set-upstream [aliases: p]
   pull      Pull with --prune deleting local branches pruned from the remote
   fetch     Fetch with --prune deleting local branches pruned from the remote
-  save      Add, commit, and push using a timestamp based commit message
+  save      Add, commit, and push using a timestamp based commit message [aliases: s]
+  commit    Commit local changes [aliases: c]
   rebase    Rebase the current branch onto the target branch after fetching
   no-hooks  Run any command without triggering any hooks [aliases: x]
   help      Print this message or the help of the given subcommand(s)
@@ -49,6 +51,17 @@ Alias: `n`
 ```
 Creates and pushes `readme-updates` to origin with `--set-upstream`. (The command git will tell you to run if you simply run `git push` after creating a new local branch.)
 
+### `save`
+Alias: `s`
+
+This is a wrapper around `lk commit + lk push`
+* Commits current changes in tracked files (optionally all files with `--all`)
+* Pushes via `lk push`
+
+### `commit`
+Alias: `c`
+* Commits current changes in tracked files (optionally all files with `--all`)
+
 ### `push`
 Alias: `p`
 * Pushes the current branch to origin with `--set-upstream`.
@@ -62,3 +75,17 @@ Alias: none (the alias `p` is for `push`)
 ### `fetch`
 Alias: none
 * Run `git fetch --prune` and remove any local branches that have also been pruned on the remote.
+
+### `rebase`
+Fetch and rebase the current branch onto the target branch, or `main` by default.
+
+### `no-hooks`
+Alias: `x`
+
+Execute a git commit without running any hooks
+
+#### Example
+
+```sh
+lk x commit -m "Commit without any hooks"
+```
