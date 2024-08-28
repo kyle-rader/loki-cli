@@ -24,8 +24,14 @@ const NO_HOOKS: &str = "core.hooksPath=/dev/null";
 
 #[derive(Debug, Parser)]
 struct CommitOptions {
-    #[clap(short, long)]
+    /// Stage and commit all changes with --all
+    #[clap(short, long, default_value = "false")]
     all: bool,
+
+    /// Stage and commit only tracked files with --update
+    #[clap(short, long, default_value = "false")]
+    update: bool,
+
     /// Optional message to include. Each MESSAGE will be joined on whitespace.
     message: Vec<String>,
 }
@@ -56,10 +62,14 @@ enum Cli {
     Fetch,
 
     /// Add, commit, and push using a timestamp based commit message.
+    ///
+    /// Optionally stage files with --all or --update.
     #[clap(visible_alias = "s")]
     Save(CommitOptions),
 
-    /// Commit local changes
+    /// Commit local changes.
+    ///
+    /// Optionally stage files with --all or --update.
     #[clap(visible_alias = "c")]
     Commit(CommitOptions),
 
@@ -88,8 +98,8 @@ fn main() -> Result<(), String> {
         Cli::Push { force } => push_branch(*force),
         Cli::Pull => pull_prune(),
         Cli::Fetch => fetch_prune(),
-        Cli::Save(CommitOptions { all, message }) => save(*all, message),
-        Cli::Commit(CommitOptions { all, message }) => commit(*all, message),
+        Cli::Save(commit_options) => save(commit_options),
+        Cli::Commit(commit_options) => commit(commit_options),
         Cli::Rebase { target } => rebase(target),
         Cli::NoHooks { command } => no_hooks(command),
     }
@@ -130,26 +140,42 @@ fn rebase(target: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn save(all: bool, message: &[String]) -> Result<(), String> {
-    commit(all, message)?;
+fn save(options: &CommitOptions) -> Result<(), String> {
+    commit(options)?;
     push_branch(false)?;
     Ok(())
 }
 
-fn commit(all: bool, message: &[String]) -> Result<(), String> {
-    let selector_option = if all { "--all" } else { "--update" };
+fn commit(
+    CommitOptions {
+        all,
+        update,
+        message,
+    }: &CommitOptions,
+) -> Result<(), String> {
+    let add_type = if *update {
+        Some("--update")
+    } else if *all {
+        Some("--all")
+    } else {
+        None
+    };
 
     let message = if message.is_empty() {
         String::from("lk commit")
     } else {
-        // leading space important for the format of the message below.
         message.join(" ")
     };
 
-    git_commands_status(vec![
-        ("add files", vec!["add", selector_option]),
-        ("commit", vec!["commit", "--message", message.as_str()]),
-    ])?;
+    let mut commands = vec![];
+
+    if let Some(add_type) = add_type {
+        commands.push(("add files", vec!["add", add_type]));
+    }
+
+    commands.push(("commit", vec!["commit", "--message", message.as_str()]));
+
+    git_commands_status(commands)?;
 
     Ok(())
 }
