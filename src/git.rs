@@ -1,8 +1,4 @@
-use std::{
-    collections::HashSet,
-    ffi::OsStr,
-    process::{Command, Output},
-};
+use std::{collections::HashSet, ffi::OsStr, process::Command};
 
 const GIT: &str = "git";
 
@@ -30,34 +26,46 @@ where
         .try_for_each(|(name, cmd)| git_command_status(name, cmd))
 }
 
-pub fn git_command_output<I, S>(name: &str, args: I) -> Result<Output, String>
+/// Execute a git command and return an iterator over its output lines (both stdout and stderr).
+pub fn git_command_iter<I, S>(name: &str, args: I) -> Result<impl Iterator<Item = String>, String>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    match Command::new(GIT).args(args).output() {
-        Ok(output) => Ok(output),
-        Err(err) => Err(format!("{} failed: {}", name, err)),
-    }
+    let output = Command::new(GIT)
+        .args(args)
+        .output()
+        .map_err(|err| format!("{} failed: {}", name, err))?;
+
+    let stderr = String::from_utf8(output.stderr).map_err(|e| format!("{e}"))?;
+    let stdout = String::from_utf8(output.stdout).map_err(|e| format!("{e}"))?;
+
+    // Combine stderr and stdout lines into a single iterator
+    let lines = stderr
+        .lines()
+        .chain(stdout.lines())
+        .map(String::from)
+        .collect::<Vec<_>>()
+        .into_iter();
+
+    Ok(lines)
 }
 
 pub fn git_current_branch() -> Result<String, String> {
-    let Output { stdout, .. } = git_command_output(
+    let mut lines = git_command_iter(
         "get current branch",
         vec!["rev-parse", "--abbrev-ref", "HEAD"],
     )?;
 
-    match String::from_utf8(stdout) {
-        Ok(value) => Ok(String::from(value.trim())),
-        Err(err) => Err(format!("{}", err)),
-    }
+    lines
+        .next()
+        .map(|line| line.trim().to_string())
+        .ok_or_else(|| "No output from git rev-parse".to_string())
 }
 
 pub fn git_branches() -> Result<HashSet<String>, String> {
     let branches: HashSet<String> =
-        git_command_lines("get branches", vec!["branch", "--format=%(refname:short)"])?
-            .into_iter()
-            .collect();
+        git_command_iter("get branches", vec!["branch", "--format=%(refname:short)"])?.collect();
     Ok(branches)
 }
 
@@ -66,18 +74,5 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let Output { stdout, stderr, .. } = git_command_output(name, args)?;
-
-    let stderr = String::from_utf8(stderr).map_err(|e| format!("{e}"))?;
-    let stdout = String::from_utf8(stdout).map_err(|e| format!("{e}"))?;
-
-    let mut lines: Vec<String> = Vec::new();
-    for l in stderr.lines() {
-        lines.push(String::from(l));
-    }
-    for l in stdout.lines() {
-        lines.push(String::from(l));
-    }
-
-    Ok(lines)
+    Ok(git_command_iter(name, args)?.collect())
 }
