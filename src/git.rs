@@ -1,4 +1,10 @@
-use std::{collections::HashSet, ffi::OsStr, process::Command};
+use std::{
+    collections::HashSet,
+    ffi::OsStr,
+    io::{BufRead, BufReader},
+    process::{Command, Stdio},
+    sync::mpsc,
+};
 
 const GIT: &str = "git";
 
@@ -12,6 +18,62 @@ where
         return Err(format!("{} failed to run: {}", name, error));
     }
     Ok(())
+}
+
+/// Execute the git command and return an iterator over its output lines (both stdout and stderr) as they arrive.
+pub fn git_command_stream<I, S>(name: &str, args: I) -> Result<impl Iterator<Item = String>, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let mut child = Command::new(GIT)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("{} failed to start: {}", name, err))?;
+
+    // Get handles to stdout and stderr
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| format!("{} failed to capture stdout", name))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| format!("{} failed to capture stderr", name))?;
+
+    // Create channel for collecting output lines
+    let (sender, receiver) = mpsc::channel();
+    let sender_clone = sender.clone();
+
+    // Create readers for stdout and stderr
+    let stdout_reader = BufReader::new(stdout);
+    let stderr_reader = BufReader::new(stderr);
+
+    // Spawn thread for stdout
+    std::thread::spawn(move || {
+        stdout_reader.lines().for_each(|line| {
+            if let Ok(line) = line {
+                let _ = sender.send(line);
+            }
+        });
+    });
+
+    // Spawn thread for stderr
+    std::thread::spawn(move || {
+        stderr_reader.lines().for_each(|line| {
+            if let Ok(line) = line {
+                let _ = sender_clone.send(line);
+            }
+        });
+
+        // Wait for the child process to complete
+        let _ = child.wait();
+    });
+
+    // Return an iterator over the received lines
+    Ok(std::iter::from_fn(move || receiver.recv().ok()))
 }
 
 /// Execute the list of git commands in order, returning on the first failure. No redirection is done.
