@@ -225,6 +225,9 @@ fn format_duration(duration: Duration) -> String {
         return String::from("0s");
     }
 
+    let years = seconds / 31_536_000;
+    seconds %= 31_536_000;
+
     let days = seconds / 86_400;
     seconds %= 86_400;
     let hours = seconds / 3_600;
@@ -232,6 +235,9 @@ fn format_duration(duration: Duration) -> String {
     let minutes = seconds / 60;
 
     let mut parts = Vec::new();
+    if years > 0 {
+        parts.push(format!("{years}y"));
+    }
     if days > 0 {
         parts.push(format!("{days}d"));
     }
