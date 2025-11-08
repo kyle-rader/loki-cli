@@ -1,11 +1,14 @@
 pub mod git;
 pub mod pruning;
 
-use std::vec;
+use std::{
+    collections::HashMap,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use clap::{
     builder::{styling::AnsiColor, Styles},
-    Parser,
+    Parser, Subcommand,
 };
 use git::{
     git_branches, git_command_iter, git_command_status, git_commands_status, git_current_branch,
@@ -34,6 +37,12 @@ struct CommitOptions {
 
     /// Optional message to include. Each MESSAGE will be joined on whitespace.
     message: Vec<String>,
+}
+
+#[derive(Debug, Subcommand)]
+enum RepoSubcommand {
+    /// Display repository statistics.
+    Stats,
 }
 
 #[derive(Parser)]
@@ -86,6 +95,12 @@ enum Cli {
         /// The command to run.
         command: Vec<String>,
     },
+
+    /// Repository related commands.
+    Repo {
+        #[clap(subcommand)]
+        command: RepoSubcommand,
+    },
 }
 
 const LOKI_NEW_PREFIX: &str = "LOKI_NEW_PREFIX";
@@ -102,6 +117,9 @@ fn main() -> Result<(), String> {
         Cli::Commit(commit_options) => commit(commit_options),
         Cli::Rebase { target } => rebase(target),
         Cli::NoHooks { command } => no_hooks(command),
+        Cli::Repo {
+            command: RepoSubcommand::Stats,
+        } => repo_stats(),
     }
 }
 
@@ -120,6 +138,121 @@ fn no_hooks(command: &[impl AsRef<str>]) -> Result<(), String> {
     git_command_status("run command without hooks", args)?;
 
     Ok(())
+}
+
+fn repo_stats() -> Result<(), String> {
+    let author_lines =
+        git::git_command_lines("collect commit authors", vec!["log", "--pretty=format:%an"])?;
+
+    if author_lines.is_empty() {
+        println!("No commits found.");
+        return Ok(());
+    }
+
+    let mut author_counts: HashMap<String, usize> = HashMap::new();
+
+    for raw_author in author_lines {
+        let trimmed = raw_author.trim();
+        let author = if trimmed.is_empty() {
+            String::from("Unknown")
+        } else {
+            trimmed.to_string()
+        };
+
+        *author_counts.entry(author).or_insert(0) += 1;
+    }
+
+    let total_commits: usize = author_counts.values().sum();
+
+    let mut author_counts: Vec<(String, usize)> = author_counts.into_iter().collect();
+    author_counts.sort_by(|(author_a, count_a), (author_b, count_b)| {
+        count_b.cmp(count_a).then_with(|| author_a.cmp(author_b))
+    });
+
+    let first_commit_hashes = git::git_command_lines(
+        "find initial commits",
+        vec!["rev-list", "--max-parents=0", "HEAD"],
+    )?;
+
+    let first_commit_hash = first_commit_hashes
+        .first()
+        .ok_or_else(|| String::from("Failed to determine the first commit."))?
+        .trim()
+        .to_string();
+
+    let first_commit_timestamp = git::git_command_lines(
+        "get first commit timestamp",
+        vec!["show", "-s", "--format=%ct", first_commit_hash.as_str()],
+    )?
+    .first()
+    .ok_or_else(|| String::from("Failed to read first commit timestamp."))?
+    .trim()
+    .parse::<u64>()
+    .map_err(|err| format!("Failed to parse first commit timestamp: {err}"))?;
+
+    let first_commit_date = git::git_command_lines(
+        "get first commit date",
+        vec!["show", "-s", "--format=%cs", first_commit_hash.as_str()],
+    )?
+    .first()
+    .map(|date| date.trim().to_string())
+    .unwrap_or_else(|| String::from("unknown"));
+
+    let first_commit_time = UNIX_EPOCH + Duration::from_secs(first_commit_timestamp);
+
+    let since_first_commit = SystemTime::now()
+        .duration_since(first_commit_time)
+        .unwrap_or_else(|_| Duration::from_secs(0));
+
+    println!("Total commits: {total_commits}");
+    println!(
+        "Time since first commit: {} (since {})",
+        format_duration(since_first_commit),
+        first_commit_date
+    );
+    println!("Commits by author:");
+    for (author, count) in author_counts {
+        println!("{author}: {count}");
+    }
+
+    Ok(())
+}
+
+fn format_duration(duration: Duration) -> String {
+    let mut seconds = duration.as_secs();
+
+    if seconds == 0 {
+        return String::from("0s");
+    }
+
+    let years = seconds / 31_536_000;
+    seconds %= 31_536_000;
+
+    let days = seconds / 86_400;
+    seconds %= 86_400;
+    let hours = seconds / 3_600;
+    seconds %= 3_600;
+    let minutes = seconds / 60;
+
+    let mut parts = Vec::new();
+    if years > 0 {
+        parts.push(format!("{years}y"));
+    }
+    if days > 0 {
+        parts.push(format!("{days}d"));
+    }
+    if hours > 0 {
+        parts.push(format!("{hours}h"));
+    }
+    if minutes > 0 {
+        parts.push(format!("{minutes}m"));
+    }
+    let remaining_seconds = duration.as_secs() % 60;
+    if parts.is_empty() || remaining_seconds > 0 && parts.len() < 3 {
+        parts.push(format!("{remaining_seconds}s"));
+    }
+
+    parts.join(" ")
 }
 
 fn rebase(target: &str) -> Result<(), String> {
