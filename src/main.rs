@@ -10,7 +10,7 @@ use clap::{
 use git::{
     git_branches, git_command_iter, git_command_status, git_commands_status, git_current_branch,
 };
-use pruning::is_pruned_branch;
+use pruning::{highlight_branch_name, highlight_pruned_branch_line, is_pruned_branch};
 
 fn styles() -> clap::builder::Styles {
     Styles::styled()
@@ -243,11 +243,13 @@ fn prune(cmd: &str) -> Result<(), String> {
     let mut pruned_branches = Vec::new();
 
     for line in git_command_iter("pull with pruning", vec![cmd, "--prune"])? {
-        println!("{line}");
-        if let Some(pruned_branch) = is_pruned_branch(line) {
+        if let Some(pruned_branch) = is_pruned_branch(line.clone()) {
+            println!("{}", highlight_pruned_branch_line(&line, &pruned_branch));
             if branches.contains(&pruned_branch) && pruned_branch != current_branch {
                 pruned_branches.push(pruned_branch);
             }
+        } else {
+            println!("{line}");
         }
     }
 
@@ -263,9 +265,15 @@ fn prune(cmd: &str) -> Result<(), String> {
             branch_delete_cmd,
         );
         if let Err(err) = branch_delete {
-            eprintln!("Failed to delete pruned branch {pruned_branch}: {err:?}")
+            eprintln!(
+                "Failed to delete pruned branch {}: {err:?}",
+                highlight_branch_name(&pruned_branch)
+            )
         } else {
-            println!("💣 Deleted local branch {pruned_branch} (pruned from remote)");
+            println!(
+                "💣 Deleted local branch {} (pruned from remote)",
+                highlight_branch_name(&pruned_branch)
+            );
         }
     }
 
