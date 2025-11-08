@@ -212,7 +212,7 @@ fn repo_stats() -> Result<(), String> {
     );
     println!("Commits by author:");
     for (author, count) in author_counts {
-        println!("  {author}: {count}");
+        println!("{author}: {count}");
     }
 
     Ok(())
