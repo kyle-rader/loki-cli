@@ -22,7 +22,7 @@ Loki: 🚀 A Git productivity tool
 Usage: lk <COMMAND>
 
 Commands:
-  new       Create a new branch from HEAD and push it to origin. Set a prefix for all new branch names with the env var LOKI_NEW_PREFIX [aliases: n]
+  new       Create a new branch from HEAD and push it to origin. Set a prefix with --prefix or the LOKI_NEW_PREFIX env var [aliases: n]
   push      Push the current branch to origin with --set-upstream [aliases: p]
   pull      Pull with --prune deleting local branches pruned from the remote
   fetch     Fetch with --prune deleting local branches pruned from the remote
@@ -43,7 +43,7 @@ Options:
 Alias: `n`
 * Make creating a new branch easier to type by joining all given args with a dash (`-`).
 * Automatically push and setup tracking to `origin`.
-* Set a prefix to always prepend with the `LOKI_NEW_PREFIX` environment variable.
+* Set a prefix to always prepend with the `--prefix` flag or the `LOKI_NEW_PREFIX` environment variable.
 
 #### Example
 ```
