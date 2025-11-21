@@ -49,9 +49,13 @@ enum RepoSubcommand {
 #[clap(version, about, author, color = clap::ColorChoice::Auto, styles = styles())]
 enum Cli {
     /// Create a new branch from HEAD and push it to origin.
-    /// Set a prefix for all new branch names with the env var LOKI_NEW_PREFIX
+    /// Set a prefix for all new branch names with `--prefix` or `LOKI_NEW_PREFIX`.
     #[clap(visible_alias = "n")]
     New {
+        /// Optional prefix to prepend to the generated branch name.
+        #[clap(long, env = "LOKI_NEW_PREFIX")]
+        prefix: Option<String>,
+
         /// List of names to join with dashes to form a valid branch name.
         name: Vec<String>,
     },
@@ -109,7 +113,7 @@ fn main() -> Result<(), String> {
     let cli = Cli::parse();
 
     match &cli {
-        Cli::New { name } => new_branch(name),
+        Cli::New { name, prefix } => new_branch(name, prefix.as_deref()),
         Cli::Push { force } => push_branch(*force),
         Cli::Pull => pull_prune(),
         Cli::Fetch => fetch_prune(),
@@ -313,15 +317,15 @@ fn commit(
     Ok(())
 }
 
-fn new_branch(name: &[String]) -> Result<(), String> {
+fn new_branch(name: &[String], prefix: Option<&str>) -> Result<(), String> {
     if name.is_empty() {
         return Err(String::from("name cannot be empty."));
     }
 
     let mut name = name.join("-");
 
-    if let Ok(prefix) = std::env::var(LOKI_NEW_PREFIX) {
-        eprintln!("Using prefix from env var {LOKI_NEW_PREFIX}={prefix}");
+    if let Some(prefix) = prefix {
+        eprintln!("Using branch prefix `{prefix}` (set via --prefix or {LOKI_NEW_PREFIX}).");
         name = format!("{prefix}{name}");
     }
 
