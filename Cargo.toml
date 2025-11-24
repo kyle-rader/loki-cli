@@ -1,6 +1,6 @@
 [package]
 name = "loki-cli"
-version = "0.9.3"
+version = "0.10.0"
 authors = ["Kyle W. Rader"]
 description = "Loki: 🚀 A Git productivity tool"
 homepage = "https://github.com/kyle-rader/loki-cli"
@@ -17,6 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.5.4", features = ["derive", "unicode", "env"] }
+chrono = { version = "0.4", features = ["clock"] }
 
 [dev-dependencies]
 test-case = "3.3.1"
