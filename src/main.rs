@@ -131,8 +131,8 @@ enum Cli {
     },
 
     /// Analyze first-parent commits by author over time.
-    #[clap(name = "author-stats")]
-    AuthorStats(AuthorStatsOptions),
+    #[clap(name = "stats")]
+    Stats(AuthorStatsOptions),
 }
 
 const LOKI_NEW_PREFIX: &str = "LOKI_NEW_PREFIX";
@@ -153,7 +153,7 @@ fn main() -> Result<(), String> {
         Cli::Repo {
             command: RepoSubcommand::Stats,
         } => repo_stats(),
-        Cli::AuthorStats(options) => author_stats(options),
+        Cli::Stats(options) => author_stats(options),
     }
 }
 
@@ -264,7 +264,7 @@ fn author_stats(options: &AuthorStatsOptions) -> Result<(), String> {
     let range = resolve_time_range(options)?;
     let log_lines = git::git_command_lines(
         "collect author stats",
-        vec!["log", "--first-parent", "--pretty=format:%ct%x09%an", "HEAD"],
+        vec!["log", "--first-parent", "--pretty=format:%ct%x09%ae", "HEAD"],
     )?;
 
     let mut totals: HashMap<String, usize> = HashMap::new();
@@ -276,8 +276,8 @@ fn author_stats(options: &AuthorStatsOptions) -> Result<(), String> {
             continue;
         }
 
-        let (timestamp_part, author_part) = trimmed.split_once('\t').ok_or_else(|| {
-            format!("Unexpected git log output (expected `<timestamp>\\t<author>`): `{trimmed}`")
+        let (timestamp_part, email_part) = trimmed.split_once('\t').ok_or_else(|| {
+            format!("Unexpected git log output (expected `<timestamp>\\t<email>`): `{trimmed}`")
         })?;
 
         let timestamp = timestamp_part.parse::<i64>().map_err(|err| {
@@ -293,22 +293,22 @@ fn author_stats(options: &AuthorStatsOptions) -> Result<(), String> {
             }
         }
 
-        let author = author_part.trim();
-        let author = if author.is_empty() {
+        let email = email_part.trim();
+        let email = if email.is_empty() {
             String::from("Unknown")
         } else {
-            author.to_string()
+            email.to_string()
         };
 
         let date = DateTime::from_timestamp(timestamp, 0)
             .ok_or_else(|| format!("Commit timestamp out of range: {timestamp}"))?
             .date_naive();
 
-        *totals.entry(author.clone()).or_insert(0) += 1;
+        *totals.entry(email.clone()).or_insert(0) += 1;
         timeline
             .entry(date)
-            .or_insert_with(HashMap::new)
-            .entry(author)
+            .or_default()
+            .entry(email)
             .and_modify(|count| *count += 1)
             .or_insert(1);
     }
@@ -322,8 +322,8 @@ fn author_stats(options: &AuthorStatsOptions) -> Result<(), String> {
     }
 
     let mut author_counts: Vec<(String, usize)> = totals.into_iter().collect();
-    author_counts.sort_by(|(author_a, count_a), (author_b, count_b)| {
-        count_b.cmp(count_a).then_with(|| author_a.cmp(author_b))
+    author_counts.sort_by(|(email_a, count_a), (email_b, count_b)| {
+        count_b.cmp(count_a).then_with(|| email_a.cmp(email_b))
     });
 
     let total_commits: usize = author_counts.iter().map(|(_, count)| *count).sum();
@@ -346,12 +346,11 @@ fn author_stats(options: &AuthorStatsOptions) -> Result<(), String> {
         author_counts.len()
     );
     println!("Commits by author:");
-    for (author, count) in &author_counts {
-        println!("  {author}: {count}");
+    for (email, count) in &author_counts {
+        println!("  {email}: {count}");
     }
 
     print_author_graph(&author_counts);
-    print_timeline(&timeline);
 
     Ok(())
 }
@@ -363,7 +362,7 @@ fn print_author_graph(author_counts: &[(String, usize)]) {
 
     let max_author_len = author_counts
         .iter()
-        .map(|(author, _)| author.len())
+        .map(|(email, _)| email.len())
         .max()
         .unwrap_or(0);
     let max_count = author_counts
@@ -377,7 +376,7 @@ fn print_author_graph(author_counts: &[(String, usize)]) {
     }
 
     println!("Commit distribution graph:");
-    for (author, count) in author_counts {
+    for (email, count) in author_counts {
         let mut bar_len = if max_count == 0 {
             0
         } else {
@@ -393,31 +392,11 @@ fn print_author_graph(author_counts: &[(String, usize)]) {
         let padding = " ".repeat(padding_len);
 
         println!(
-            "{author:<width$} | {}{} ({count})",
+            "{email:<width$} | {}{} ({count})",
             bar,
             padding,
             width = max_author_len
         );
-    }
-}
-
-fn print_timeline(timeline: &BTreeMap<NaiveDate, HashMap<String, usize>>) {
-    if timeline.is_empty() {
-        return;
-    }
-
-    println!("Daily breakdown (first-parent commits):");
-    for (date, counts) in timeline {
-        let mut entries: Vec<_> = counts.iter().collect();
-        entries.sort_by(|(author_a, count_a), (author_b, count_b)| {
-            count_b.cmp(count_a).then_with(|| author_a.cmp(author_b))
-        });
-        let summary = entries
-            .into_iter()
-            .map(|(author, count)| format!("{author}: {count}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        println!("{date} | {summary}");
     }
 }
 
