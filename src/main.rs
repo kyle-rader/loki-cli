@@ -264,10 +264,16 @@ fn author_stats(options: &AuthorStatsOptions) -> Result<(), String> {
     let range = resolve_time_range(options)?;
     let log_lines = git::git_command_lines(
         "collect author stats",
-        vec!["log", "--first-parent", "--pretty=format:%ct%x09%ae", "HEAD"],
+        vec![
+            "log",
+            "--first-parent",
+            "--pretty=format:%ct%x09%an%x09%ae",
+            "HEAD",
+        ],
     )?;
 
     let mut totals: HashMap<String, usize> = HashMap::new();
+    let mut email_to_name: HashMap<String, String> = HashMap::new();
     let mut timeline: BTreeMap<NaiveDate, HashMap<String, usize>> = BTreeMap::new();
 
     for raw_line in log_lines {
@@ -276,9 +282,15 @@ fn author_stats(options: &AuthorStatsOptions) -> Result<(), String> {
             continue;
         }
 
-        let (timestamp_part, email_part) = trimmed.split_once('\t').ok_or_else(|| {
-            format!("Unexpected git log output (expected `<timestamp>\\t<email>`): `{trimmed}`")
-        })?;
+        let parts: Vec<&str> = trimmed.split('\t').collect();
+        if parts.len() != 3 {
+            return Err(format!(
+                "Unexpected git log output (expected `<timestamp>\\t<name>\\t<email>`): `{trimmed}`"
+            ));
+        }
+        let timestamp_part = parts[0];
+        let name_part = parts[1];
+        let email_part = parts[2];
 
         let timestamp = timestamp_part.parse::<i64>().map_err(|err| {
             format!("Failed to parse git log timestamp `{timestamp_part}`: {err}")
@@ -299,6 +311,13 @@ fn author_stats(options: &AuthorStatsOptions) -> Result<(), String> {
         } else {
             email.to_string()
         };
+
+        let name = name_part.trim();
+        if !name.is_empty() {
+            email_to_name
+                .entry(email.clone())
+                .or_insert_with(|| name.to_string());
+        }
 
         let date = DateTime::from_timestamp(timestamp, 0)
             .ok_or_else(|| format!("Commit timestamp out of range: {timestamp}"))?
@@ -347,10 +366,26 @@ fn author_stats(options: &AuthorStatsOptions) -> Result<(), String> {
     );
     println!("Commits by author:");
     for (email, count) in &author_counts {
-        println!("  {email}: {count}");
+        let display = if let Some(name) = email_to_name.get(email) {
+            format!("{} <{}>", name, email)
+        } else {
+            email.clone()
+        };
+        println!("  {display}: {count}");
     }
 
-    print_author_graph(&author_counts);
+    let author_counts_with_names: Vec<(String, usize)> = author_counts
+        .iter()
+        .map(|(email, count)| {
+            let display = if let Some(name) = email_to_name.get(email) {
+                format!("{} <{}>", name, email)
+            } else {
+                email.clone()
+            };
+            (display, *count)
+        })
+        .collect();
+    print_author_graph(&author_counts_with_names);
 
     Ok(())
 }
@@ -484,9 +519,8 @@ fn resolve_time_range(options: &AuthorStatsOptions) -> Result<TimeRange, String>
 }
 
 fn parse_naive_date(value: &str) -> Result<NaiveDate, String> {
-    NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|err| {
-        format!("Invalid date `{value}` (expected YYYY-MM-DD): {err}")
-    })
+    NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .map_err(|err| format!("Invalid date `{value}` (expected YYYY-MM-DD): {err}"))
 }
 
 fn format_duration(duration: Duration) -> String {
