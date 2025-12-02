@@ -61,6 +61,10 @@ struct AuthorStatsOptions {
     /// Include commits through YYYY-MM-DD (defaults to today).
     #[clap(long, value_parser = parse_naive_date)]
     to: Option<NaiveDate>,
+
+    /// Limit the output to the top N contributors.
+    #[clap(long)]
+    top: Option<usize>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -262,6 +266,11 @@ struct TimeRange {
 
 fn author_stats(options: &AuthorStatsOptions) -> Result<(), String> {
     let range = resolve_time_range(options)?;
+    if let Some(top) = options.top {
+        if top == 0 {
+            return Err(String::from("--top must be greater than zero."));
+        }
+    }
     let log_lines = git::git_command_lines(
         "collect author stats",
         vec![
@@ -346,6 +355,16 @@ fn author_stats(options: &AuthorStatsOptions) -> Result<(), String> {
     });
 
     let total_commits: usize = author_counts.iter().map(|(_, count)| *count).sum();
+    let unique_authors = author_counts.len();
+    let display_author_counts: Vec<(String, usize)> = if let Some(top_n) = options.top {
+        author_counts
+            .iter()
+            .take(top_n)
+            .cloned()
+            .collect()
+    } else {
+        author_counts.clone()
+    };
 
     let resolved_end_label = if range.end_is_latest {
         timeline
@@ -362,30 +381,21 @@ fn author_stats(options: &AuthorStatsOptions) -> Result<(), String> {
         range.start_label,
         resolved_end_label,
         total_commits,
-        author_counts.len()
+        unique_authors
     );
-    println!("Commits by author:");
-    for (email, count) in &author_counts {
-        let display = if let Some(name) = email_to_name.get(email) {
-            format!("{} <{}>", name, email)
-        } else {
-            email.clone()
-        };
-        println!("  {display}: {count}");
-    }
 
-    let author_counts_with_names: Vec<(String, usize)> = author_counts
-        .iter()
+    let display_author_counts_with_names: Vec<(String, usize)> = display_author_counts
+        .into_iter()
         .map(|(email, count)| {
-            let display = if let Some(name) = email_to_name.get(email) {
+            let display = if let Some(name) = email_to_name.get(&email) {
                 format!("{} <{}>", name, email)
             } else {
-                email.clone()
+                email
             };
-            (display, *count)
+            (display, count)
         })
         .collect();
-    print_author_graph(&author_counts_with_names);
+    print_author_graph(&display_author_counts_with_names);
 
     Ok(())
 }
@@ -410,7 +420,7 @@ fn print_author_graph(author_counts: &[(String, usize)]) {
         return;
     }
 
-    println!("Commit distribution graph:");
+    println!("Commits by author (distribution graph):");
     for (email, count) in author_counts {
         let mut bar_len = if max_count == 0 {
             0
@@ -422,7 +432,7 @@ fn print_author_graph(author_counts: &[(String, usize)]) {
         }
         bar_len = bar_len.min(AUTHOR_GRAPH_WIDTH);
 
-        let bar = "#".repeat(bar_len);
+        let bar = ".".repeat(bar_len);
         let padding_len = AUTHOR_GRAPH_WIDTH.saturating_sub(bar_len);
         let padding = " ".repeat(padding_len);
 
