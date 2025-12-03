@@ -89,3 +89,11 @@ Execute a git commit without running any hooks
 ```sh
 lk x -- commit -m "Update Readme without running hooks"
 ```
+
+### `repo stats`
+Analyze first-parent commits to see who has been landing work in a repository. All of the filtering flags operate on commit dates.
+
+#### Example
+```
+❯ lk repo stats --weeks 4 --top 5
+```
