@@ -8,6 +8,7 @@ use clap::{
     builder::{styling::AnsiColor, Styles},
     Parser, Subcommand,
 };
+use colored::Colorize;
 use git::{
     git_branches, git_command_iter, git_command_status, git_commands_status, git_current_branch,
 };
@@ -305,10 +306,11 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
         range.end_label.clone()
     };
 
-    println!(
-        "First-parent commits between {} and {}: {} total ({} authors).",
-        range.start_label, resolved_end_label, total_commits, unique_authors
-    );
+    // Dashboard-style stats list
+    println!("Repository Statistics");
+    println!("  Range: {} to {}", range.start_label, resolved_end_label);
+    println!("  Total commits: {}", total_commits.to_string().green());
+    println!("  Authors: {}", unique_authors.to_string().green());
 
     let display_author_counts_with_names: Vec<(String, usize)> = display_author_counts
         .into_iter()
@@ -373,7 +375,7 @@ fn print_author_graph(author_counts: &[(String, usize)]) {
     }
 
     println!("Commits by author (distribution graph):");
-    for (email, count) in author_counts {
+    for (author_display, count) in author_counts {
         let mut bar_len = if max_count == 0 {
             0
         } else {
@@ -384,12 +386,30 @@ fn print_author_graph(author_counts: &[(String, usize)]) {
         }
         bar_len = bar_len.min(AUTHOR_GRAPH_WIDTH);
 
-        let bar = ".".repeat(bar_len);
+        // Color the dots purple
+        let bar = ".".repeat(bar_len).purple();
         let padding_len = AUTHOR_GRAPH_WIDTH.saturating_sub(bar_len);
         let padding = " ".repeat(padding_len);
 
+        // Color the count green
+        let count_str = count.to_string().green();
+
+        // Colorize email addresses (extract email from "Name <email>" format or use as-is)
+        let colored_author = if let Some(start) = author_display.find('<') {
+            if let Some(end) = author_display.find('>') {
+                let name = &author_display[..start].trim();
+                let email = &author_display[start + 1..end];
+                format!("{} <{}>", name, email.yellow().to_string())
+            } else {
+                author_display.yellow().to_string()
+            }
+        } else {
+            // If no angle brackets, assume the whole thing is an email
+            author_display.yellow().to_string()
+        };
+
         println!(
-            "{email:<width$} | {}{} ({count})",
+            "{colored_author:<width$} | {}{} ({count_str})",
             bar,
             padding,
             width = max_author_len
