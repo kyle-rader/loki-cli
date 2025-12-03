@@ -62,6 +62,29 @@ struct RepoStatsOptions {
     /// Limit the output to the top N contributors.
     #[clap(long)]
     top: Option<usize>,
+
+    /// Only include commits authored by these names (repeatable, case-insensitive).
+    #[clap(long = "name", value_name = "NAME")]
+    names: Vec<String>,
+
+    /// Only include commits authored by these emails (repeatable, case-insensitive).
+    #[clap(long = "email", value_name = "EMAIL")]
+    emails: Vec<String>,
+}
+
+impl Default for RepoStatsOptions {
+    fn default() -> Self {
+        Self {
+            days: None,
+            weeks: None,
+            months: None,
+            from: None,
+            to: None,
+            top: None,
+            names: Vec::new(),
+            emails: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -241,6 +264,10 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
         let name = name_part.trim();
         let canonical_email =
             canonicalize_author(email.as_str(), name, &mut email_aliases, &mut name_to_email);
+
+        if !matches_author_filters(name, canonical_email.as_str(), options) {
+            continue;
+        }
 
         if !name.is_empty() {
             email_to_name
@@ -467,6 +494,30 @@ fn resolve_time_range(options: &RepoStatsOptions) -> Result<TimeRange, String> {
     })
 }
 
+fn matches_author_filters(name: &str, email: &str, options: &RepoStatsOptions) -> bool {
+    if !options.names.is_empty()
+        && (name.is_empty()
+            || !options
+                .names
+                .iter()
+                .any(|filter| name.eq_ignore_ascii_case(filter)))
+    {
+        return false;
+    }
+
+    if !options.emails.is_empty()
+        && (email.is_empty()
+            || !options
+                .emails
+                .iter()
+                .any(|filter| email.eq_ignore_ascii_case(filter)))
+    {
+        return false;
+    }
+
+    true
+}
+
 fn parse_naive_date(value: &str) -> Result<NaiveDate, String> {
     NaiveDate::parse_from_str(value, "%Y-%m-%d")
         .map_err(|err| format!("Invalid date `{value}` (expected YYYY-MM-DD): {err}"))
@@ -681,5 +732,62 @@ mod tests {
             &mut name_to_email,
         );
         assert_eq!(reused, "alias@microsoft.com");
+    }
+
+    #[test]
+    fn matches_author_filters_by_name() {
+        let mut options = RepoStatsOptions::default();
+        options.names = vec![String::from("Example User")];
+
+        assert!(matches_author_filters(
+            "Example User",
+            "user@example.com",
+            &options
+        ));
+        assert!(!matches_author_filters(
+            "Someone Else",
+            "user@example.com",
+            &options
+        ));
+    }
+
+    #[test]
+    fn matches_author_filters_by_email() {
+        let mut options = RepoStatsOptions::default();
+        options.emails = vec![String::from("user@example.com")];
+
+        assert!(matches_author_filters(
+            "Example User",
+            "user@example.com",
+            &options
+        ));
+        assert!(!matches_author_filters(
+            "Example User",
+            "other@example.com",
+            &options
+        ));
+    }
+
+    #[test]
+    fn matches_author_filters_requires_all_filters() {
+        let mut options = RepoStatsOptions::default();
+        options.names = vec![String::from("Example User")];
+        options.emails = vec![String::from("user@example.com")];
+
+        assert!(matches_author_filters(
+            "Example User",
+            "user@example.com",
+            &options
+        ));
+        assert!(!matches_author_filters(
+            "Example User",
+            "other@example.com",
+            &options
+        ));
+        assert!(!matches_author_filters(
+            "Another User",
+            "user@example.com",
+            &options
+        ));
     }
 }

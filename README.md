@@ -93,6 +93,9 @@ lk x -- commit -m "Update Readme without running hooks"
 ### `repo stats`
 Analyze first-parent commits to see who has been landing work in a repository. All of the filtering flags operate on commit dates.
 
+- `--name` filters by author display name (repeatable, case-insensitive).
+- `--email` filters by author email (repeatable, case-insensitive).
+
 #### Example
 ```
 ❯ lk repo stats --weeks 4 --top 5
