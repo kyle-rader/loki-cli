@@ -37,7 +37,7 @@ struct CommitOptions {
     message: Vec<String>,
 }
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Default, Parser)]
 struct RepoStatsOptions {
     /// Limit analysis to commits from the last N days.
     #[clap(long, conflicts_with_all = &["weeks", "months", "from"])]
@@ -63,29 +63,15 @@ struct RepoStatsOptions {
     #[clap(long)]
     top: Option<usize>,
 
-    /// Only include commits authored by these names (repeatable, case-insensitive).
+    /// Only include commits authored by these names (repeatable, case-insensitive fuzzy match).
     #[clap(long = "name", value_name = "NAME")]
     names: Vec<String>,
 
-    /// Only include commits authored by these emails (repeatable, case-insensitive).
+    /// Only include commits authored by these emails (repeatable, case-insensitive fuzzy match).
     #[clap(long = "email", value_name = "EMAIL")]
     emails: Vec<String>,
 }
 
-impl Default for RepoStatsOptions {
-    fn default() -> Self {
-        Self {
-            days: None,
-            weeks: None,
-            months: None,
-            from: None,
-            to: None,
-            top: None,
-            names: Vec::new(),
-            emails: Vec::new(),
-        }
-    }
-}
 
 #[derive(Debug, Subcommand)]
 enum RepoSubcommand {
@@ -500,7 +486,7 @@ fn matches_author_filters(name: &str, email: &str, options: &RepoStatsOptions) -
             || !options
                 .names
                 .iter()
-                .any(|filter| name.eq_ignore_ascii_case(filter)))
+                .any(|filter| name.to_lowercase().contains(&filter.to_lowercase())))
     {
         return false;
     }
@@ -510,7 +496,7 @@ fn matches_author_filters(name: &str, email: &str, options: &RepoStatsOptions) -
             || !options
                 .emails
                 .iter()
-                .any(|filter| email.eq_ignore_ascii_case(filter)))
+                .any(|filter| email.to_lowercase().contains(&filter.to_lowercase())))
     {
         return false;
     }
@@ -735,7 +721,7 @@ mod tests {
     }
 
     #[test]
-    fn matches_author_filters_by_name() {
+    fn matches_author_filters_by_name_exact() {
         let mut options = RepoStatsOptions::default();
         options.names = vec![String::from("Example User")];
 
@@ -752,7 +738,49 @@ mod tests {
     }
 
     #[test]
-    fn matches_author_filters_by_email() {
+    fn matches_author_filters_by_name_fuzzy() {
+        let mut options = RepoStatsOptions::default();
+        options.names = vec![String::from("example")];
+
+        // Fuzzy match: "example" is a substring of "Example User"
+        assert!(matches_author_filters(
+            "Example User",
+            "user@example.com",
+            &options
+        ));
+        // Case insensitive fuzzy match
+        assert!(matches_author_filters(
+            "EXAMPLE USER",
+            "user@example.com",
+            &options
+        ));
+        // No match
+        assert!(!matches_author_filters(
+            "Someone Else",
+            "user@example.com",
+            &options
+        ));
+    }
+
+    #[test]
+    fn matches_author_filters_by_name_case_insensitive() {
+        let mut options = RepoStatsOptions::default();
+        options.names = vec![String::from("EXAMPLE USER")];
+
+        assert!(matches_author_filters(
+            "example user",
+            "user@example.com",
+            &options
+        ));
+        assert!(matches_author_filters(
+            "Example User",
+            "user@example.com",
+            &options
+        ));
+    }
+
+    #[test]
+    fn matches_author_filters_by_email_exact() {
         let mut options = RepoStatsOptions::default();
         options.emails = vec![String::from("user@example.com")];
 
@@ -764,6 +792,48 @@ mod tests {
         assert!(!matches_author_filters(
             "Example User",
             "other@example.com",
+            &options
+        ));
+    }
+
+    #[test]
+    fn matches_author_filters_by_email_fuzzy() {
+        let mut options = RepoStatsOptions::default();
+        options.emails = vec![String::from("example.com")];
+
+        // Fuzzy match: "example.com" is a substring of "user@example.com"
+        assert!(matches_author_filters(
+            "Example User",
+            "user@example.com",
+            &options
+        ));
+        // Also matches other emails from the same domain
+        assert!(matches_author_filters(
+            "Example User",
+            "other@example.com",
+            &options
+        ));
+        // No match for different domain
+        assert!(!matches_author_filters(
+            "Example User",
+            "user@other.com",
+            &options
+        ));
+    }
+
+    #[test]
+    fn matches_author_filters_by_email_case_insensitive() {
+        let mut options = RepoStatsOptions::default();
+        options.emails = vec![String::from("USER@EXAMPLE.COM")];
+
+        assert!(matches_author_filters(
+            "Example User",
+            "user@example.com",
+            &options
+        ));
+        assert!(matches_author_filters(
+            "Example User",
+            "User@Example.Com",
             &options
         ));
     }
@@ -781,12 +851,37 @@ mod tests {
         ));
         assert!(!matches_author_filters(
             "Example User",
-            "other@example.com",
+            "other@other.com",
             &options
         ));
         assert!(!matches_author_filters(
             "Another User",
             "user@example.com",
+            &options
+        ));
+    }
+
+    #[test]
+    fn matches_author_filters_fuzzy_with_multiple_filters() {
+        let mut options = RepoStatsOptions::default();
+        options.names = vec![String::from("john"), String::from("jane")];
+
+        // Matches first filter
+        assert!(matches_author_filters(
+            "John Smith",
+            "john@example.com",
+            &options
+        ));
+        // Matches second filter
+        assert!(matches_author_filters(
+            "Jane Doe",
+            "jane@example.com",
+            &options
+        ));
+        // No match
+        assert!(!matches_author_filters(
+            "Bob Wilson",
+            "bob@example.com",
             &options
         ));
     }
