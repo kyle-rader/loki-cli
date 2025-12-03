@@ -500,7 +500,7 @@ fn matches_author_filters(name: &str, email: &str, options: &RepoStatsOptions) -
             || !options
                 .names
                 .iter()
-                .any(|filter| name.eq_ignore_ascii_case(filter)))
+                .any(|filter| name.to_lowercase().contains(&filter.to_lowercase())))
     {
         return false;
     }
@@ -510,7 +510,7 @@ fn matches_author_filters(name: &str, email: &str, options: &RepoStatsOptions) -
             || !options
                 .emails
                 .iter()
-                .any(|filter| email.eq_ignore_ascii_case(filter)))
+                .any(|filter| email.to_lowercase().contains(&filter.to_lowercase())))
     {
         return false;
     }
@@ -787,6 +787,91 @@ mod tests {
         assert!(!matches_author_filters(
             "Another User",
             "user@example.com",
+            &options
+        ));
+    }
+
+    #[test]
+    fn matches_author_filters_fuzzy_name() {
+        let mut options = RepoStatsOptions::default();
+        options.names = vec![String::from("John")];
+
+        assert!(matches_author_filters(
+            "John Doe",
+            "user@example.com",
+            &options
+        ));
+        assert!(matches_author_filters(
+            "Jane John Smith",
+            "user@example.com",
+            &options
+        ));
+        assert!(!matches_author_filters(
+            "Jane Doe",
+            "user@example.com",
+            &options
+        ));
+    }
+
+    #[test]
+    fn matches_author_filters_fuzzy_email() {
+        let mut options = RepoStatsOptions::default();
+        options.emails = vec![String::from("example")];
+
+        assert!(matches_author_filters(
+            "John Doe",
+            "user@example.com",
+            &options
+        ));
+        assert!(matches_author_filters(
+            "Jane Smith",
+            "admin@example.org",
+            &options
+        ));
+        assert!(!matches_author_filters(
+            "John Doe",
+            "user@test.com",
+            &options
+        ));
+    }
+
+    #[test]
+    fn matches_author_filters_case_insensitive() {
+        let mut options = RepoStatsOptions::default();
+        options.names = vec![String::from("john")];
+        options.emails = vec![String::from("EXAMPLE")];
+
+        assert!(matches_author_filters(
+            "John Doe",
+            "user@example.com",
+            &options
+        ));
+        assert!(matches_author_filters(
+            "JOHN SMITH",
+            "admin@EXAMPLE.ORG",
+            &options
+        ));
+    }
+
+    #[test]
+    fn matches_author_filters_multiple_filters() {
+        let mut options = RepoStatsOptions::default();
+        options.names = vec![String::from("John"), String::from("Jane")];
+        options.emails = vec![String::from("example"), String::from("test")];
+
+        assert!(matches_author_filters(
+            "John Doe",
+            "user@example.com",
+            &options
+        ));
+        assert!(matches_author_filters(
+            "Jane Smith",
+            "admin@test.org",
+            &options
+        ));
+        assert!(!matches_author_filters(
+            "Bob Wilson",
+            "user@other.com",
             &options
         ));
     }
