@@ -144,7 +144,6 @@ enum Cli {
 }
 
 const LOKI_NEW_PREFIX: &str = "LOKI_NEW_PREFIX";
-const AUTHOR_GRAPH_WIDTH: usize = 40;
 
 fn main() -> Result<(), String> {
     let cli = Cli::parse();
@@ -359,38 +358,8 @@ fn print_author_graph(author_counts: &[(String, usize)]) {
         return;
     }
 
-    let max_author_len = author_counts
-        .iter()
-        .map(|(email, _)| email.len())
-        .max()
-        .unwrap_or(0);
-    let max_count = author_counts
-        .iter()
-        .map(|(_, count)| *count)
-        .max()
-        .unwrap_or(0);
-
-    if max_count == 0 {
-        return;
-    }
-
-    println!("Commits by author (distribution graph):");
+    println!("Commits by author:");
     for (author_display, count) in author_counts {
-        let mut bar_len = if max_count == 0 {
-            0
-        } else {
-            ((*count as f64) / (max_count as f64) * AUTHOR_GRAPH_WIDTH as f64).round() as usize
-        };
-        if *count > 0 && bar_len == 0 {
-            bar_len = 1;
-        }
-        bar_len = bar_len.min(AUTHOR_GRAPH_WIDTH);
-
-        // Color the dots purple
-        let bar = ".".repeat(bar_len).purple();
-        let padding_len = AUTHOR_GRAPH_WIDTH.saturating_sub(bar_len);
-        let padding = " ".repeat(padding_len);
-
         // Color the count green
         let count_str = count.to_string().green();
 
@@ -408,12 +377,7 @@ fn print_author_graph(author_counts: &[(String, usize)]) {
             author_display.yellow().to_string()
         };
 
-        println!(
-            "{colored_author:<width$} | {}{} ({count_str})",
-            bar,
-            padding,
-            width = max_author_len
-        );
+        println!("({count_str}) {colored_author}");
     }
 }
 
