@@ -283,6 +283,8 @@ fn author_stats(options: &AuthorStatsOptions) -> Result<(), String> {
 
     let mut totals: HashMap<String, usize> = HashMap::new();
     let mut email_to_name: HashMap<String, String> = HashMap::new();
+    let mut email_aliases: HashMap<String, String> = HashMap::new();
+    let mut name_to_email: HashMap<String, String> = HashMap::new();
     let mut timeline: BTreeMap<NaiveDate, HashMap<String, usize>> = BTreeMap::new();
 
     for raw_line in log_lines {
@@ -322,9 +324,12 @@ fn author_stats(options: &AuthorStatsOptions) -> Result<(), String> {
         };
 
         let name = name_part.trim();
+        let canonical_email =
+            canonicalize_author(email.as_str(), name, &mut email_aliases, &mut name_to_email);
+
         if !name.is_empty() {
             email_to_name
-                .entry(email.clone())
+                .entry(canonical_email.clone())
                 .or_insert_with(|| name.to_string());
         }
 
@@ -332,11 +337,11 @@ fn author_stats(options: &AuthorStatsOptions) -> Result<(), String> {
             .ok_or_else(|| format!("Commit timestamp out of range: {timestamp}"))?
             .date_naive();
 
-        *totals.entry(email.clone()).or_insert(0) += 1;
+        *totals.entry(canonical_email.clone()).or_insert(0) += 1;
         timeline
             .entry(date)
             .or_default()
-            .entry(email)
+            .entry(canonical_email)
             .and_modify(|count| *count += 1)
             .or_insert(1);
     }
@@ -357,11 +362,7 @@ fn author_stats(options: &AuthorStatsOptions) -> Result<(), String> {
     let total_commits: usize = author_counts.iter().map(|(_, count)| *count).sum();
     let unique_authors = author_counts.len();
     let display_author_counts: Vec<(String, usize)> = if let Some(top_n) = options.top {
-        author_counts
-            .iter()
-            .take(top_n)
-            .cloned()
-            .collect()
+        author_counts.iter().take(top_n).cloned().collect()
     } else {
         author_counts.clone()
     };
@@ -378,10 +379,7 @@ fn author_stats(options: &AuthorStatsOptions) -> Result<(), String> {
 
     println!(
         "First-parent commits between {} and {}: {} total ({} authors).",
-        range.start_label,
-        resolved_end_label,
-        total_commits,
-        unique_authors
+        range.start_label, resolved_end_label, total_commits, unique_authors
     );
 
     let display_author_counts_with_names: Vec<(String, usize)> = display_author_counts
@@ -398,6 +396,32 @@ fn author_stats(options: &AuthorStatsOptions) -> Result<(), String> {
     print_author_graph(&display_author_counts_with_names);
 
     Ok(())
+}
+
+fn canonicalize_author(
+    email: &str,
+    name: &str,
+    email_aliases: &mut HashMap<String, String>,
+    name_to_email: &mut HashMap<String, String>,
+) -> String {
+    if let Some(existing_email) = email_aliases.get(email) {
+        return existing_email.clone();
+    }
+
+    if !name.is_empty() {
+        if let Some(existing_email) = name_to_email.get(name) {
+            email_aliases.insert(email.to_string(), existing_email.clone());
+            return existing_email.clone();
+        } else {
+            name_to_email.insert(name.to_string(), email.to_string());
+        }
+    }
+
+    let canonical = email.to_string();
+    email_aliases
+        .entry(canonical.clone())
+        .or_insert_with(|| canonical.clone());
+    canonical
 }
 
 fn print_author_graph(author_counts: &[(String, usize)]) {
@@ -726,4 +750,58 @@ fn prune(cmd: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn canonicalize_author_reuses_first_email_for_name() {
+        let mut email_aliases = HashMap::new();
+        let mut name_to_email = HashMap::new();
+
+        let first = canonicalize_author(
+            "alias@microsoft.com",
+            "msuser",
+            &mut email_aliases,
+            &mut name_to_email,
+        );
+        assert_eq!(first, "alias@microsoft.com");
+
+        let second = canonicalize_author(
+            "msuser@microsoft.com",
+            "msuser",
+            &mut email_aliases,
+            &mut name_to_email,
+        );
+        assert_eq!(second, "alias@microsoft.com");
+    }
+
+    #[test]
+    fn canonicalize_author_handles_name_change_after_alias() {
+        let mut email_aliases = HashMap::new();
+        let mut name_to_email = HashMap::new();
+
+        canonicalize_author(
+            "alias@microsoft.com",
+            "msuser",
+            &mut email_aliases,
+            &mut name_to_email,
+        );
+        canonicalize_author(
+            "msuser@microsoft.com",
+            "msuser",
+            &mut email_aliases,
+            &mut name_to_email,
+        );
+        let reused = canonicalize_author(
+            "msuser@microsoft.com",
+            "display name",
+            &mut email_aliases,
+            &mut name_to_email,
+        );
+        assert_eq!(reused, "alias@microsoft.com");
+    }
 }
