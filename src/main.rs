@@ -1,10 +1,7 @@
 pub mod git;
 pub mod pruning;
 
-use std::{
-    collections::{BTreeMap, HashMap},
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::collections::{BTreeMap, HashMap};
 
 use chrono::{DateTime, Duration as ChronoDuration, Months, NaiveDate, Utc};
 use clap::{
@@ -41,7 +38,7 @@ struct CommitOptions {
 }
 
 #[derive(Debug, Parser)]
-struct AuthorStatsOptions {
+struct RepoStatsOptions {
     /// Limit analysis to commits from the last N days.
     #[clap(long, conflicts_with_all = &["weeks", "months", "from"])]
     days: Option<u32>,
@@ -65,12 +62,36 @@ struct AuthorStatsOptions {
     /// Limit the output to the top N contributors.
     #[clap(long)]
     top: Option<usize>,
+
+    /// Only include commits authored by these names (repeatable, case-insensitive).
+    #[clap(long = "name", value_name = "NAME")]
+    names: Vec<String>,
+
+    /// Only include commits authored by these emails (repeatable, case-insensitive).
+    #[clap(long = "email", value_name = "EMAIL")]
+    emails: Vec<String>,
+}
+
+impl Default for RepoStatsOptions {
+    fn default() -> Self {
+        Self {
+            days: None,
+            weeks: None,
+            months: None,
+            from: None,
+            to: None,
+            top: None,
+            names: Vec::new(),
+            emails: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
 enum RepoSubcommand {
-    /// Display repository statistics.
-    Stats,
+    /// Analyze first-parent commits by author over time.
+    #[clap(name = "stats")]
+    Stats(RepoStatsOptions),
 }
 
 #[derive(Parser)]
@@ -133,10 +154,6 @@ enum Cli {
         #[clap(subcommand)]
         command: RepoSubcommand,
     },
-
-    /// Analyze first-parent commits by author over time.
-    #[clap(name = "stats")]
-    Stats(AuthorStatsOptions),
 }
 
 const LOKI_NEW_PREFIX: &str = "LOKI_NEW_PREFIX";
@@ -155,9 +172,8 @@ fn main() -> Result<(), String> {
         Cli::Rebase { target } => rebase(target),
         Cli::NoHooks { command } => no_hooks(command),
         Cli::Repo {
-            command: RepoSubcommand::Stats,
-        } => repo_stats(),
-        Cli::Stats(options) => author_stats(options),
+            command: RepoSubcommand::Stats(options),
+        } => repo_stats(options),
     }
 }
 
@@ -178,84 +194,6 @@ fn no_hooks(command: &[impl AsRef<str>]) -> Result<(), String> {
     Ok(())
 }
 
-fn repo_stats() -> Result<(), String> {
-    let author_lines =
-        git::git_command_lines("collect commit authors", vec!["log", "--pretty=format:%an"])?;
-
-    if author_lines.is_empty() {
-        println!("No commits found.");
-        return Ok(());
-    }
-
-    let mut author_counts: HashMap<String, usize> = HashMap::new();
-
-    for raw_author in author_lines {
-        let trimmed = raw_author.trim();
-        let author = if trimmed.is_empty() {
-            String::from("Unknown")
-        } else {
-            trimmed.to_string()
-        };
-
-        *author_counts.entry(author).or_insert(0) += 1;
-    }
-
-    let total_commits: usize = author_counts.values().sum();
-
-    let mut author_counts: Vec<(String, usize)> = author_counts.into_iter().collect();
-    author_counts.sort_by(|(author_a, count_a), (author_b, count_b)| {
-        count_b.cmp(count_a).then_with(|| author_a.cmp(author_b))
-    });
-
-    let first_commit_hashes = git::git_command_lines(
-        "find initial commits",
-        vec!["rev-list", "--max-parents=0", "HEAD"],
-    )?;
-
-    let first_commit_hash = first_commit_hashes
-        .first()
-        .ok_or_else(|| String::from("Failed to determine the first commit."))?
-        .trim()
-        .to_string();
-
-    let first_commit_timestamp = git::git_command_lines(
-        "get first commit timestamp",
-        vec!["show", "-s", "--format=%ct", first_commit_hash.as_str()],
-    )?
-    .first()
-    .ok_or_else(|| String::from("Failed to read first commit timestamp."))?
-    .trim()
-    .parse::<u64>()
-    .map_err(|err| format!("Failed to parse first commit timestamp: {err}"))?;
-
-    let first_commit_date = git::git_command_lines(
-        "get first commit date",
-        vec!["show", "-s", "--format=%cs", first_commit_hash.as_str()],
-    )?
-    .first()
-    .map(|date| date.trim().to_string())
-    .unwrap_or_else(|| String::from("unknown"));
-
-    let first_commit_time = UNIX_EPOCH + Duration::from_secs(first_commit_timestamp);
-
-    let since_first_commit = SystemTime::now()
-        .duration_since(first_commit_time)
-        .unwrap_or_else(|_| Duration::from_secs(0));
-
-    println!("Total commits: {total_commits}");
-    println!(
-        "Time since first commit: {} (since {})",
-        format_duration(since_first_commit),
-        first_commit_date
-    );
-    println!("Commits by author:");
-    for (author, count) in author_counts {
-        println!("{author}: {count}");
-    }
-
-    Ok(())
-}
-
 struct TimeRange {
     start_ts: Option<i64>,
     end_ts: i64,
@@ -264,7 +202,7 @@ struct TimeRange {
     end_is_latest: bool,
 }
 
-fn author_stats(options: &AuthorStatsOptions) -> Result<(), String> {
+fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
     let range = resolve_time_range(options)?;
     if let Some(top) = options.top {
         if top == 0 {
@@ -326,6 +264,10 @@ fn author_stats(options: &AuthorStatsOptions) -> Result<(), String> {
         let name = name_part.trim();
         let canonical_email =
             canonicalize_author(email.as_str(), name, &mut email_aliases, &mut name_to_email);
+
+        if !matches_author_filters(name, canonical_email.as_str(), options) {
+            continue;
+        }
 
         if !name.is_empty() {
             email_to_name
@@ -469,7 +411,7 @@ fn print_author_graph(author_counts: &[(String, usize)]) {
     }
 }
 
-fn resolve_time_range(options: &AuthorStatsOptions) -> Result<TimeRange, String> {
+fn resolve_time_range(options: &RepoStatsOptions) -> Result<TimeRange, String> {
     let now = Utc::now();
     let (reference_end_dt, end_label, end_is_latest, end_ts) = if let Some(to_date) = options.to {
         let end_naive = to_date
@@ -552,46 +494,33 @@ fn resolve_time_range(options: &AuthorStatsOptions) -> Result<TimeRange, String>
     })
 }
 
+fn matches_author_filters(name: &str, email: &str, options: &RepoStatsOptions) -> bool {
+    if !options.names.is_empty()
+        && (name.is_empty()
+            || !options
+                .names
+                .iter()
+                .any(|filter| name.eq_ignore_ascii_case(filter)))
+    {
+        return false;
+    }
+
+    if !options.emails.is_empty()
+        && (email.is_empty()
+            || !options
+                .emails
+                .iter()
+                .any(|filter| email.eq_ignore_ascii_case(filter)))
+    {
+        return false;
+    }
+
+    true
+}
+
 fn parse_naive_date(value: &str) -> Result<NaiveDate, String> {
     NaiveDate::parse_from_str(value, "%Y-%m-%d")
         .map_err(|err| format!("Invalid date `{value}` (expected YYYY-MM-DD): {err}"))
-}
-
-fn format_duration(duration: Duration) -> String {
-    let mut seconds = duration.as_secs();
-
-    if seconds == 0 {
-        return String::from("0s");
-    }
-
-    let years = seconds / 31_536_000;
-    seconds %= 31_536_000;
-
-    let days = seconds / 86_400;
-    seconds %= 86_400;
-    let hours = seconds / 3_600;
-    seconds %= 3_600;
-    let minutes = seconds / 60;
-
-    let mut parts = Vec::new();
-    if years > 0 {
-        parts.push(format!("{years}y"));
-    }
-    if days > 0 {
-        parts.push(format!("{days}d"));
-    }
-    if hours > 0 {
-        parts.push(format!("{hours}h"));
-    }
-    if minutes > 0 {
-        parts.push(format!("{minutes}m"));
-    }
-    let remaining_seconds = duration.as_secs() % 60;
-    if parts.is_empty() || remaining_seconds > 0 && parts.len() < 3 {
-        parts.push(format!("{remaining_seconds}s"));
-    }
-
-    parts.join(" ")
 }
 
 fn rebase(target: &str) -> Result<(), String> {
@@ -803,5 +732,62 @@ mod tests {
             &mut name_to_email,
         );
         assert_eq!(reused, "alias@microsoft.com");
+    }
+
+    #[test]
+    fn matches_author_filters_by_name() {
+        let mut options = RepoStatsOptions::default();
+        options.names = vec![String::from("Example User")];
+
+        assert!(matches_author_filters(
+            "Example User",
+            "user@example.com",
+            &options
+        ));
+        assert!(!matches_author_filters(
+            "Someone Else",
+            "user@example.com",
+            &options
+        ));
+    }
+
+    #[test]
+    fn matches_author_filters_by_email() {
+        let mut options = RepoStatsOptions::default();
+        options.emails = vec![String::from("user@example.com")];
+
+        assert!(matches_author_filters(
+            "Example User",
+            "user@example.com",
+            &options
+        ));
+        assert!(!matches_author_filters(
+            "Example User",
+            "other@example.com",
+            &options
+        ));
+    }
+
+    #[test]
+    fn matches_author_filters_requires_all_filters() {
+        let mut options = RepoStatsOptions::default();
+        options.names = vec![String::from("Example User")];
+        options.emails = vec![String::from("user@example.com")];
+
+        assert!(matches_author_filters(
+            "Example User",
+            "user@example.com",
+            &options
+        ));
+        assert!(!matches_author_filters(
+            "Example User",
+            "other@example.com",
+            &options
+        ));
+        assert!(!matches_author_filters(
+            "Another User",
+            "user@example.com",
+            &options
+        ));
     }
 }
