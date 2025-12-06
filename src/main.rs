@@ -127,6 +127,10 @@ enum Cli {
         /// The branch to rebase onto.
         #[clap(default_value = "main", env = "LOKI_REBASE_TARGET")]
         target: String,
+
+        /// Start an interactive rebase.
+        #[clap(short, long)]
+        interactive: bool,
     },
 
     /// Run any command without triggering any hooks
@@ -155,7 +159,7 @@ fn main() -> Result<(), String> {
         Cli::Fetch => fetch_prune(),
         Cli::Save(commit_options) => save(commit_options),
         Cli::Commit(commit_options) => commit(commit_options),
-        Cli::Rebase { target } => rebase(target),
+        Cli::Rebase { target, interactive } => rebase(target, *interactive),
         Cli::NoHooks { command } => no_hooks(command),
         Cli::Repo {
             command: RepoSubcommand::Stats(options),
@@ -493,20 +497,26 @@ fn parse_naive_date(value: &str) -> Result<NaiveDate, String> {
         .map_err(|err| format!("Invalid date `{value}` (expected YYYY-MM-DD): {err}"))
 }
 
-fn rebase(target: &str) -> Result<(), String> {
-    git_commands_status(vec![
-        (
-            "fetch target",
-            vec![
-                "-c",
-                NO_HOOKS,
-                "fetch",
-                "origin",
-                format!("{target}:{target}").as_str(),
-            ],
-        ),
-        ("rebase", vec!["-c", NO_HOOKS, "rebase", target]),
-    ])?;
+fn rebase(target: &str, interactive: bool) -> Result<(), String> {
+    let fetch_target = format!("{target}:{target}");
+    git_command_status(
+        "fetch target",
+        vec![
+            "-c",
+            NO_HOOKS,
+            "fetch",
+            "origin",
+            fetch_target.as_str(),
+        ],
+    )?;
+
+    let mut rebase_args = vec!["-c", NO_HOOKS, "rebase"];
+    if interactive {
+        rebase_args.push("-i");
+    }
+    rebase_args.push(target);
+
+    git_command_status("rebase", rebase_args)?;
 
     Ok(())
 }
