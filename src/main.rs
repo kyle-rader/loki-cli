@@ -216,8 +216,8 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
     let mut email_aliases: HashMap<String, String> = HashMap::new();
     let mut name_to_email: HashMap<String, String> = HashMap::new();
     let mut latest_commit_date_in_range: Option<NaiveDate> = None;
-    let mut latest_commit_ts_in_range: Option<i64> = None;
-    let mut oldest_commit_ts_in_range: Option<i64> = None;
+    let mut latest_commit_ts_by_author: HashMap<String, i64> = HashMap::new();
+    let mut oldest_commit_ts_by_author: HashMap<String, i64> = HashMap::new();
 
     let name_filters_lower: Vec<String> = options.names.iter().map(|s| s.to_lowercase()).collect();
     let email_filters_lower: Vec<String> =
@@ -305,10 +305,15 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
         if latest_commit_date_in_range.is_none() {
             // `git log` is reverse-chronological, so the first matching commit is the latest.
             latest_commit_date_in_range = Some(date);
-            latest_commit_ts_in_range = Some(timestamp);
         }
-        // Also reverse-chronological: the last timestamp we see will be the oldest.
-        oldest_commit_ts_in_range = Some(timestamp);
+
+        // Per-author active windows. Because `git log` is reverse chronological:
+        // - the first time we see an author is their latest commit in the range
+        // - the last time we see an author becomes their oldest commit in the range
+        latest_commit_ts_by_author
+            .entry(canonical_email.clone())
+            .or_insert(timestamp);
+        oldest_commit_ts_by_author.insert(canonical_email.clone(), timestamp);
 
         *totals.entry(canonical_email.clone()).or_insert(0) += 1;
     }
@@ -332,12 +337,6 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
         );
         return Ok(());
     }
-
-    let weeks = compute_effective_weeks(
-        &range,
-        latest_commit_ts_in_range.ok_or_else(|| String::from("Missing latest commit timestamp"))?,
-        oldest_commit_ts_in_range.ok_or_else(|| String::from("Missing oldest commit timestamp"))?,
-    );
 
     let mut author_counts: Vec<(String, usize)> = totals.into_iter().collect();
     author_counts.sort_by(|(email_a, count_a), (email_b, count_b)| {
@@ -377,7 +376,11 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
             (display, count)
         })
         .collect();
-    print_author_graph(&display_author_counts_with_names, weeks);
+    print_author_graph(
+        &display_author_counts_with_names,
+        &latest_commit_ts_by_author,
+        &oldest_commit_ts_by_author,
+    );
 
     Ok(())
 }
@@ -443,21 +446,19 @@ fn matches_author_filters_lowered(
     true
 }
 
-fn compute_effective_weeks(range: &TimeRange, latest_ts: i64, oldest_ts: i64) -> f64 {
-    let span_seconds: i64 = match (range.start_ts, range.end_is_latest) {
-        (Some(start_ts), false) => range.end_ts.saturating_sub(start_ts),
-        (Some(start_ts), true) => latest_ts.saturating_sub(start_ts),
-        (None, false) => range.end_ts.saturating_sub(oldest_ts),
-        (None, true) => latest_ts.saturating_sub(oldest_ts),
-    };
-
-    // Avoid division-by-zero for very small ranges (or a single-commit range).
-    let span_seconds = span_seconds.max(1) as f64;
-    let weeks = span_seconds / (7.0 * 24.0 * 60.0 * 60.0);
-    weeks.max(1.0 / 10_000.0)
+fn active_weeks_inclusive(latest_ts: i64, oldest_ts: i64) -> f64 {
+    let span_seconds = latest_ts.saturating_sub(oldest_ts).max(0);
+    // Inclusive day window keeps single-commit authors reasonable (1 day => 1/7 week),
+    // and still properly boosts authors who only started partway through the range.
+    let active_days = (span_seconds / 86_400) + 1;
+    (active_days as f64) / 7.0
 }
 
-fn print_author_graph(author_counts: &[(String, usize)], weeks: f64) {
+fn print_author_graph(
+    author_counts: &[(String, usize)],
+    latest_commit_ts_by_author: &HashMap<String, i64>,
+    oldest_commit_ts_by_author: &HashMap<String, i64>,
+) {
     if author_counts.is_empty() {
         return;
     }
@@ -466,9 +467,6 @@ fn print_author_graph(author_counts: &[(String, usize)], weeks: f64) {
     for (author_display, count) in author_counts {
         // Color the count green
         let count_str = count.to_string().green();
-        let commits_per_week = (*count as f64) / weeks;
-        let commits_per_week_str = format!("{commits_per_week:.1}");
-        let commits_per_week_suffix = format!("({commits_per_week_str}/wk)").purple();
 
         // Colorize email addresses (extract email from "Name <email>" format or use as-is)
         let colored_author = if let Some(start) = author_display.find('<') {
@@ -484,8 +482,25 @@ fn print_author_graph(author_counts: &[(String, usize)], weeks: f64) {
             author_display.yellow().to_string()
         };
 
+        let email_key = extract_email_key(author_display);
+        let commits_per_week_suffix = email_key
+            .and_then(|email| {
+                let latest_ts = latest_commit_ts_by_author.get(email)?;
+                let oldest_ts = oldest_commit_ts_by_author.get(email)?;
+                let weeks = active_weeks_inclusive(*latest_ts, *oldest_ts);
+                let commits_per_week = (*count as f64) / weeks;
+                Some(format!("({commits_per_week:.1}/wk)").purple())
+            })
+            .unwrap_or_else(|| "(?/wk)".purple());
+
         println!("({count_str}) {colored_author} {commits_per_week_suffix}");
     }
+}
+
+fn extract_email_key(author_display: &str) -> Option<&str> {
+    let start = author_display.find('<')?;
+    let end = author_display.rfind('>')?;
+    (start < end).then(|| author_display[start + 1..end].trim())
 }
 
 fn resolve_time_range(options: &RepoStatsOptions) -> Result<TimeRange, String> {
@@ -1037,5 +1052,21 @@ mod tests {
             "bob@example.com",
             &options
         ));
+    }
+
+    #[test]
+    fn active_weeks_inclusive_counts_single_day_as_one_seventh_week() {
+        // Same-day activity => 1 active day => 1/7 week.
+        let weeks = active_weeks_inclusive(1_700_000_000, 1_700_000_000);
+        assert!((weeks - (1.0 / 7.0)).abs() < 1e-9, "weeks={weeks}");
+    }
+
+    #[test]
+    fn active_weeks_inclusive_increases_with_span_days() {
+        // 8 days inclusive => 8/7 weeks.
+        let oldest = 1_700_000_000;
+        let latest = oldest + (7 * 86_400);
+        let weeks = active_weeks_inclusive(latest, oldest);
+        assert!((weeks - (8.0 / 7.0)).abs() < 1e-9, "weeks={weeks}");
     }
 }
