@@ -468,6 +468,7 @@ fn print_author_graph(author_counts: &[(String, usize)], weeks: f64) {
         let count_str = count.to_string().green();
         let commits_per_week = (*count as f64) / weeks;
         let commits_per_week_str = format!("{commits_per_week:.1}");
+        let commits_per_week_suffix = format!("({commits_per_week_str}/wk)").purple();
 
         // Colorize email addresses (extract email from "Name <email>" format or use as-is)
         let colored_author = if let Some(start) = author_display.find('<') {
@@ -483,7 +484,7 @@ fn print_author_graph(author_counts: &[(String, usize)], weeks: f64) {
             author_display.yellow().to_string()
         };
 
-        println!("({count_str}) {colored_author} ({commits_per_week_str}/wk)");
+        println!("({count_str}) {colored_author} {commits_per_week_suffix}");
     }
 }
 
