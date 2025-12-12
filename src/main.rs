@@ -216,6 +216,8 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
     let mut email_aliases: HashMap<String, String> = HashMap::new();
     let mut name_to_email: HashMap<String, String> = HashMap::new();
     let mut latest_commit_date_in_range: Option<NaiveDate> = None;
+    let mut latest_commit_ts_in_range: Option<i64> = None;
+    let mut oldest_commit_ts_in_range: Option<i64> = None;
 
     let name_filters_lower: Vec<String> = options.names.iter().map(|s| s.to_lowercase()).collect();
     let email_filters_lower: Vec<String> =
@@ -303,7 +305,10 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
         if latest_commit_date_in_range.is_none() {
             // `git log` is reverse-chronological, so the first matching commit is the latest.
             latest_commit_date_in_range = Some(date);
+            latest_commit_ts_in_range = Some(timestamp);
         }
+        // Also reverse-chronological: the last timestamp we see will be the oldest.
+        oldest_commit_ts_in_range = Some(timestamp);
 
         *totals.entry(canonical_email.clone()).or_insert(0) += 1;
     }
@@ -327,6 +332,12 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
         );
         return Ok(());
     }
+
+    let weeks = compute_effective_weeks(
+        &range,
+        latest_commit_ts_in_range.ok_or_else(|| String::from("Missing latest commit timestamp"))?,
+        oldest_commit_ts_in_range.ok_or_else(|| String::from("Missing oldest commit timestamp"))?,
+    );
 
     let mut author_counts: Vec<(String, usize)> = totals.into_iter().collect();
     author_counts.sort_by(|(email_a, count_a), (email_b, count_b)| {
@@ -366,7 +377,7 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
             (display, count)
         })
         .collect();
-    print_author_graph(&display_author_counts_with_names);
+    print_author_graph(&display_author_counts_with_names, weeks);
 
     Ok(())
 }
@@ -432,7 +443,21 @@ fn matches_author_filters_lowered(
     true
 }
 
-fn print_author_graph(author_counts: &[(String, usize)]) {
+fn compute_effective_weeks(range: &TimeRange, latest_ts: i64, oldest_ts: i64) -> f64 {
+    let span_seconds: i64 = match (range.start_ts, range.end_is_latest) {
+        (Some(start_ts), false) => range.end_ts.saturating_sub(start_ts),
+        (Some(start_ts), true) => latest_ts.saturating_sub(start_ts),
+        (None, false) => range.end_ts.saturating_sub(oldest_ts),
+        (None, true) => latest_ts.saturating_sub(oldest_ts),
+    };
+
+    // Avoid division-by-zero for very small ranges (or a single-commit range).
+    let span_seconds = span_seconds.max(1) as f64;
+    let weeks = span_seconds / (7.0 * 24.0 * 60.0 * 60.0);
+    weeks.max(1.0 / 10_000.0)
+}
+
+fn print_author_graph(author_counts: &[(String, usize)], weeks: f64) {
     if author_counts.is_empty() {
         return;
     }
@@ -441,6 +466,8 @@ fn print_author_graph(author_counts: &[(String, usize)]) {
     for (author_display, count) in author_counts {
         // Color the count green
         let count_str = count.to_string().green();
+        let commits_per_week = (*count as f64) / weeks;
+        let commits_per_week_str = format!("{commits_per_week:.1}");
 
         // Colorize email addresses (extract email from "Name <email>" format or use as-is)
         let colored_author = if let Some(start) = author_display.find('<') {
@@ -456,7 +483,7 @@ fn print_author_graph(author_counts: &[(String, usize)]) {
             author_display.yellow().to_string()
         };
 
-        println!("({count_str}) {colored_author}");
+        println!("({count_str}) {colored_author} ({commits_per_week_str}/wk)");
     }
 }
 
