@@ -1,7 +1,16 @@
 pub mod git;
 pub mod pruning;
 
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::HashMap,
+    io::{BufRead, Write},
+    process::{Command, Stdio},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use chrono::{DateTime, Duration as ChronoDuration, Months, NaiveDate, Utc};
 use clap::{
@@ -193,69 +202,94 @@ struct TimeRange {
 }
 
 fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
+    let progress = start_delayed_progress_meter("Computing repo stats...", Duration::from_secs(1));
+
     let range = resolve_time_range(options)?;
     if let Some(top) = options.top {
         if top == 0 {
             return Err(String::from("--top must be greater than zero."));
         }
     }
-    let log_lines = git::git_command_lines(
-        "collect author stats",
-        vec![
-            "log",
-            "--first-parent",
-            "--pretty=format:%ct%x09%an%x09%ae",
-            "HEAD",
-        ],
-    )?;
 
     let mut totals: HashMap<String, usize> = HashMap::new();
     let mut email_to_name: HashMap<String, String> = HashMap::new();
     let mut email_aliases: HashMap<String, String> = HashMap::new();
     let mut name_to_email: HashMap<String, String> = HashMap::new();
-    let mut timeline: BTreeMap<NaiveDate, HashMap<String, usize>> = BTreeMap::new();
+    let mut latest_commit_date_in_range: Option<NaiveDate> = None;
+    let mut latest_commit_ts_by_author: HashMap<String, i64> = HashMap::new();
+    let mut oldest_commit_ts_by_author: HashMap<String, i64> = HashMap::new();
 
-    for raw_line in log_lines {
+    let name_filters_lower: Vec<String> = options.names.iter().map(|s| s.to_lowercase()).collect();
+    let email_filters_lower: Vec<String> =
+        options.emails.iter().map(|s| s.to_lowercase()).collect();
+
+    let mut git_args: Vec<String> = vec![
+        "log".to_string(),
+        "--first-parent".to_string(),
+        "--pretty=format:%ct%x09%an%x09%ae".to_string(),
+    ];
+    if let Some(start_ts) = range.start_ts {
+        git_args.push(format!("--since=@{start_ts}"));
+    }
+    if !range.end_is_latest {
+        git_args.push(format!("--until=@{}", range.end_ts));
+    }
+    git_args.push("HEAD".to_string());
+
+    let mut child = Command::new("git")
+        .args(git_args)
+        .stdout(Stdio::piped())
+        // Avoid buffering/stalling on stderr while still surfacing errors.
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|err| format!("collect author stats failed to start: {err}"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| String::from("collect author stats failed to capture stdout"))?;
+    let reader = std::io::BufReader::new(stdout);
+
+    for raw_line in reader.lines() {
+        let raw_line = raw_line
+            .map_err(|err| format!("Failed to read git log output: {err}"))?;
         let trimmed = raw_line.trim();
         if trimmed.is_empty() {
             continue;
         }
 
-        let parts: Vec<&str> = trimmed.split('\t').collect();
-        if parts.len() != 3 {
+        let mut parts = trimmed.splitn(3, '\t');
+        let (timestamp_part, name_part, email_part) =
+            match (parts.next(), parts.next(), parts.next()) {
+                (Some(ts), Some(name), Some(email)) => (ts, name, email),
+                _ => {
+                    return Err(format!(
+                        "Unexpected git log output (expected `<timestamp>\\t<name>\\t<email>`): `{trimmed}`"
+                    ));
+                }
+            };
+        if timestamp_part.is_empty() {
             return Err(format!(
                 "Unexpected git log output (expected `<timestamp>\\t<name>\\t<email>`): `{trimmed}`"
             ));
         }
-        let timestamp_part = parts[0];
-        let name_part = parts[1];
-        let email_part = parts[2];
 
         let timestamp = timestamp_part.parse::<i64>().map_err(|err| {
             format!("Failed to parse git log timestamp `{timestamp_part}`: {err}")
         })?;
 
-        if timestamp > range.end_ts {
-            continue;
-        }
-        if let Some(start_ts) = range.start_ts {
-            if timestamp < start_ts {
-                continue;
-            }
-        }
-
         let email = email_part.trim();
-        let email = if email.is_empty() {
-            String::from("Unknown")
-        } else {
-            email.to_string()
-        };
+        let email = if email.is_empty() { "Unknown" } else { email };
 
         let name = name_part.trim();
         let canonical_email =
-            canonicalize_author(email.as_str(), name, &mut email_aliases, &mut name_to_email);
+            canonicalize_author(email, name, &mut email_aliases, &mut name_to_email);
 
-        if !matches_author_filters(name, canonical_email.as_str(), options) {
+        if !matches_author_filters_lowered(
+            name,
+            canonical_email.as_str(),
+            &name_filters_lower,
+            &email_filters_lower,
+        ) {
             continue;
         }
 
@@ -268,15 +302,33 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
         let date = DateTime::from_timestamp(timestamp, 0)
             .ok_or_else(|| format!("Commit timestamp out of range: {timestamp}"))?
             .date_naive();
+        if latest_commit_date_in_range.is_none() {
+            // `git log` is reverse-chronological, so the first matching commit is the latest.
+            latest_commit_date_in_range = Some(date);
+        }
+
+        // Per-author active windows. Because `git log` is reverse chronological:
+        // - the first time we see an author is their latest commit in the range
+        // - the last time we see an author becomes their oldest commit in the range
+        latest_commit_ts_by_author
+            .entry(canonical_email.clone())
+            .or_insert(timestamp);
+        oldest_commit_ts_by_author.insert(canonical_email.clone(), timestamp);
 
         *totals.entry(canonical_email.clone()).or_insert(0) += 1;
-        timeline
-            .entry(date)
-            .or_default()
-            .entry(canonical_email)
-            .and_modify(|count| *count += 1)
-            .or_insert(1);
     }
+
+    let status = child
+        .wait()
+        .map_err(|err| format!("collect author stats failed to wait: {err}"))?;
+    if !status.success() {
+        return Err(format!(
+            "collect author stats failed with exit code: {}",
+            status.code().unwrap_or(-1)
+        ));
+    }
+
+    progress.finish();
 
     if totals.is_empty() {
         println!(
@@ -300,9 +352,7 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
     };
 
     let resolved_end_label = if range.end_is_latest {
-        timeline
-            .keys()
-            .next_back()
+        latest_commit_date_in_range
             .map(|date| format!("{date} (latest commit)"))
             .unwrap_or_else(|| String::from("latest commit"))
     } else {
@@ -326,7 +376,11 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
             (display, count)
         })
         .collect();
-    print_author_graph(&display_author_counts_with_names);
+    print_author_graph(
+        &display_author_counts_with_names,
+        &latest_commit_ts_by_author,
+        &oldest_commit_ts_by_author,
+    );
 
     Ok(())
 }
@@ -357,7 +411,54 @@ fn canonicalize_author(
     canonical
 }
 
-fn print_author_graph(author_counts: &[(String, usize)]) {
+fn matches_author_filters_lowered(
+    name: &str,
+    email: &str,
+    name_filters_lower: &[String],
+    email_filters_lower: &[String],
+) -> bool {
+    if !name_filters_lower.is_empty() {
+        if name.is_empty() {
+            return false;
+        }
+        let name_lower = name.to_lowercase();
+        if !name_filters_lower
+            .iter()
+            .any(|filter| name_lower.contains(filter))
+        {
+            return false;
+        }
+    }
+
+    if !email_filters_lower.is_empty() {
+        if email.is_empty() {
+            return false;
+        }
+        let email_lower = email.to_lowercase();
+        if !email_filters_lower
+            .iter()
+            .any(|filter| email_lower.contains(filter))
+        {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn active_weeks_inclusive(latest_ts: i64, oldest_ts: i64) -> f64 {
+    let span_seconds = latest_ts.saturating_sub(oldest_ts).max(0);
+    // Inclusive day window keeps single-commit authors reasonable (1 day => 1/7 week),
+    // and still properly boosts authors who only started partway through the range.
+    let active_days = (span_seconds / 86_400) + 1;
+    (active_days as f64) / 7.0
+}
+
+fn print_author_graph(
+    author_counts: &[(String, usize)],
+    latest_commit_ts_by_author: &HashMap<String, i64>,
+    oldest_commit_ts_by_author: &HashMap<String, i64>,
+) {
     if author_counts.is_empty() {
         return;
     }
@@ -381,8 +482,25 @@ fn print_author_graph(author_counts: &[(String, usize)]) {
             author_display.yellow().to_string()
         };
 
-        println!("({count_str}) {colored_author}");
+        let email_key = extract_email_key(author_display);
+        let commits_per_week_suffix = email_key
+            .and_then(|email| {
+                let latest_ts = latest_commit_ts_by_author.get(email)?;
+                let oldest_ts = oldest_commit_ts_by_author.get(email)?;
+                let weeks = active_weeks_inclusive(*latest_ts, *oldest_ts);
+                let commits_per_week = (*count as f64) / weeks;
+                Some(format!("({commits_per_week:.1}/wk)").purple())
+            })
+            .unwrap_or_else(|| "(?/wk)".purple());
+
+        println!("({count_str}) {colored_author} {commits_per_week_suffix}");
     }
+}
+
+fn extract_email_key(author_display: &str) -> Option<&str> {
+    let start = author_display.find('<')?;
+    let end = author_display.rfind('>')?;
+    (start < end).then(|| author_display[start + 1..end].trim())
 }
 
 fn resolve_time_range(options: &RepoStatsOptions) -> Result<TimeRange, String> {
@@ -495,6 +613,62 @@ fn matches_author_filters(name: &str, email: &str, options: &RepoStatsOptions) -
 fn parse_naive_date(value: &str) -> Result<NaiveDate, String> {
     NaiveDate::parse_from_str(value, "%Y-%m-%d")
         .map_err(|err| format!("Invalid date `{value}` (expected YYYY-MM-DD): {err}"))
+}
+
+struct ProgressMeter {
+    done: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ProgressMeter {
+    fn finish(mut self) {
+        self.done.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+        // Clear the line in case we printed progress.
+        let mut stderr = std::io::stderr();
+        let _ = write!(stderr, "\r{}\r", " ".repeat(80));
+        let _ = stderr.flush();
+    }
+}
+
+impl Drop for ProgressMeter {
+    fn drop(&mut self) {
+        self.done.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+        let mut stderr = std::io::stderr();
+        let _ = write!(stderr, "\r{}\r", " ".repeat(80));
+        let _ = stderr.flush();
+    }
+}
+
+fn start_delayed_progress_meter(message: &'static str, delay: Duration) -> ProgressMeter {
+    let done = Arc::new(AtomicBool::new(false));
+    let done_clone = Arc::clone(&done);
+    let handle = std::thread::spawn(move || {
+        std::thread::sleep(delay);
+        if done_clone.load(Ordering::Relaxed) {
+            return;
+        }
+
+        let spinner = ['|', '/', '-', '\\'];
+        let mut i = 0usize;
+        while !done_clone.load(Ordering::Relaxed) {
+            let mut stderr = std::io::stderr();
+            let _ = write!(stderr, "\r{message} {}", spinner[i % spinner.len()]);
+            let _ = stderr.flush();
+            i = i.wrapping_add(1);
+            std::thread::sleep(Duration::from_millis(120));
+        }
+    });
+
+    ProgressMeter {
+        done,
+        handle: Some(handle),
+    }
 }
 
 fn rebase(target: &str, interactive: bool) -> Result<(), String> {
@@ -878,5 +1052,21 @@ mod tests {
             "bob@example.com",
             &options
         ));
+    }
+
+    #[test]
+    fn active_weeks_inclusive_counts_single_day_as_one_seventh_week() {
+        // Same-day activity => 1 active day => 1/7 week.
+        let weeks = active_weeks_inclusive(1_700_000_000, 1_700_000_000);
+        assert!((weeks - (1.0 / 7.0)).abs() < 1e-9, "weeks={weeks}");
+    }
+
+    #[test]
+    fn active_weeks_inclusive_increases_with_span_days() {
+        // 8 days inclusive => 8/7 weeks.
+        let oldest = 1_700_000_000;
+        let latest = oldest + (7 * 86_400);
+        let weeks = active_weeks_inclusive(latest, oldest);
+        assert!((weeks - (8.0 / 7.0)).abs() < 1e-9, "weeks={weeks}");
     }
 }
