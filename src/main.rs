@@ -70,8 +70,8 @@ struct RepoStatsOptions {
     to: Option<NaiveDate>,
 
     /// Limit the output to the top N contributors.
-    #[clap(long)]
-    top: Option<usize>,
+    #[clap(long, default_value_t = 20)]
+    top: usize,
 
     /// Only include commits authored by these names (repeatable, case-insensitive fuzzy match).
     #[clap(long = "name", value_name = "NAME")]
@@ -205,10 +205,8 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
     let progress = start_delayed_progress_meter("Computing repo stats...", Duration::from_secs(1));
 
     let range = resolve_time_range(options)?;
-    if let Some(top) = options.top {
-        if top == 0 {
-            return Err(String::from("--top must be greater than zero."));
-        }
+    if options.top == 0 {
+        return Err(String::from("--top must be greater than zero."));
     }
 
     let mut totals: HashMap<String, usize> = HashMap::new();
@@ -345,11 +343,8 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
 
     let total_commits: usize = author_counts.iter().map(|(_, count)| *count).sum();
     let unique_authors = author_counts.len();
-    let display_author_counts: Vec<(String, usize)> = if let Some(top_n) = options.top {
-        author_counts.iter().take(top_n).cloned().collect()
-    } else {
-        author_counts.clone()
-    };
+    let display_author_counts: Vec<(String, usize)> =
+        author_counts.iter().take(options.top).cloned().collect();
 
     let resolved_end_label = if range.end_is_latest {
         latest_commit_date_in_range
@@ -454,6 +449,27 @@ fn active_weeks_inclusive(latest_ts: i64, oldest_ts: i64) -> f64 {
     (active_days as f64) / 7.0
 }
 
+fn active_days_inclusive(latest_ts: i64, oldest_ts: i64) -> i64 {
+    let span_seconds = latest_ts.saturating_sub(oldest_ts).max(0);
+    (span_seconds / 86_400) + 1
+}
+
+fn format_active_span(latest_ts: i64, oldest_ts: i64) -> String {
+    // Use an average Gregorian year/month to avoid jumpy “calendar” math.
+    let days = active_days_inclusive(latest_ts, oldest_ts) as f64;
+    let years = days / 365.25;
+    if years >= 1.0 {
+        let rounded = (years * 10.0).round() / 10.0;
+        let unit = if (rounded - 1.0).abs() < 1e-9 { "year" } else { "years" };
+        format!("{rounded:.1} {unit}")
+    } else {
+        let months = days / (365.25 / 12.0);
+        let rounded = (months * 10.0).round() / 10.0;
+        let unit = if (rounded - 1.0).abs() < 1e-9 { "month" } else { "months" };
+        format!("{rounded:.1} {unit}")
+    }
+}
+
 fn print_author_graph(
     author_counts: &[(String, usize)],
     latest_commit_ts_by_author: &HashMap<String, i64>,
@@ -462,6 +478,8 @@ fn print_author_graph(
     if author_counts.is_empty() {
         return;
     }
+
+    const MIN_COMMITS_FOR_RATE: usize = 3;
 
     println!("Commits by author:");
     for (author_display, count) in author_counts {
@@ -482,25 +500,40 @@ fn print_author_graph(
             author_display.yellow().to_string()
         };
 
-        let email_key = extract_email_key(author_display);
-        let commits_per_week_suffix = email_key
-            .and_then(|email| {
-                let latest_ts = latest_commit_ts_by_author.get(email)?;
-                let oldest_ts = oldest_commit_ts_by_author.get(email)?;
-                let weeks = active_weeks_inclusive(*latest_ts, *oldest_ts);
-                let commits_per_week = (*count as f64) / weeks;
-                Some(format!("({commits_per_week:.1}/wk)").purple())
-            })
-            .unwrap_or_else(|| "(?/wk)".purple());
+        let commits_per_week_suffix: String = if *count >= MIN_COMMITS_FOR_RATE {
+            let email_key = extract_email_key(author_display);
+            email_key
+                .and_then(|email| {
+                    let latest_ts = latest_commit_ts_by_author.get(email)?;
+                    let oldest_ts = oldest_commit_ts_by_author.get(email)?;
+                    let weeks = active_weeks_inclusive(*latest_ts, *oldest_ts);
+                    if weeks <= 0.0 {
+                        return None;
+                    }
+                    let commits_per_week = (*count as f64) / weeks;
+                    let span = format_active_span(*latest_ts, *oldest_ts);
+                    Some(format!("({commits_per_week:.1}/wk over {span})").purple().to_string())
+                })
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
 
-        println!("({count_str}) {colored_author} {commits_per_week_suffix}");
+        if commits_per_week_suffix.is_empty() {
+            println!("({count_str}) {colored_author}");
+        } else {
+            println!("({count_str}) {colored_author} {commits_per_week_suffix}");
+        }
     }
 }
 
 fn extract_email_key(author_display: &str) -> Option<&str> {
-    let start = author_display.find('<')?;
-    let end = author_display.rfind('>')?;
-    (start < end).then(|| author_display[start + 1..end].trim())
+    if let Some(start) = author_display.find('<') {
+        let end = author_display.rfind('>')?;
+        (start < end).then(|| author_display[start + 1..end].trim())
+    } else {
+        Some(author_display.trim())
+    }
 }
 
 fn resolve_time_range(options: &RepoStatsOptions) -> Result<TimeRange, String> {
@@ -1068,5 +1101,26 @@ mod tests {
         let latest = oldest + (7 * 86_400);
         let weeks = active_weeks_inclusive(latest, oldest);
         assert!((weeks - (8.0 / 7.0)).abs() < 1e-9, "weeks={weeks}");
+    }
+
+    #[test]
+    fn format_active_span_uses_months_below_one_year() {
+        // 6 months-ish
+        let oldest = 1_700_000_000;
+        let latest = oldest + (183 * 86_400);
+        let span = format_active_span(latest, oldest);
+        assert!(
+            span.contains("month"),
+            "expected months in span, got `{span}`"
+        );
+    }
+
+    #[test]
+    fn format_active_span_uses_years_at_or_above_one_year() {
+        // ~400 days
+        let oldest = 1_700_000_000;
+        let latest = oldest + (399 * 86_400);
+        let span = format_active_span(latest, oldest);
+        assert!(span.contains("year"), "expected years in span, got `{span}`");
     }
 }
