@@ -154,6 +154,10 @@ enum Cli {
         #[clap(subcommand)]
         command: RepoSubcommand,
     },
+
+    /// Push the main branch to the release branch.
+    #[clap(visible_alias = "r")]
+    Release,
 }
 
 const LOKI_NEW_PREFIX: &str = "LOKI_NEW_PREFIX";
@@ -173,7 +177,13 @@ fn main() -> Result<(), String> {
         Cli::Repo {
             command: RepoSubcommand::Stats(options),
         } => repo_stats(options),
+        Cli::Release => release(),
     }
+}
+
+fn release() -> Result<(), String> {
+    git_command_status("push main to release", vec!["push", "origin", "main:release"])?;
+    Ok(())
 }
 
 fn no_hooks(command: &[impl AsRef<str>]) -> Result<(), String> {
