@@ -85,7 +85,7 @@ struct RepoStatsOptions {
 
 #[derive(Debug, Subcommand)]
 enum RepoSubcommand {
-    /// Analyze first-parent commits by author over time.
+    /// Analyze commits by author over time.
     #[clap(name = "stats")]
     Stats(RepoStatsOptions),
 }
@@ -233,7 +233,6 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
 
     let mut git_args: Vec<String> = vec![
         "log".to_string(),
-        "--first-parent".to_string(),
         "--pretty=format:%ct%x09%an%x09%ae".to_string(),
     ];
     if let Some(start_ts) = range.start_ts {
@@ -340,7 +339,7 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
 
     if totals.is_empty() {
         println!(
-            "No first-parent commits found between {} and {}.",
+            "No commits found between {} and {}.",
             range.start_label, range.end_label
         );
         return Ok(());
