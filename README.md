@@ -95,7 +95,7 @@ Analyze commits reachable from HEAD to see who has been landing work in a reposi
 
 - `--name` filters by author display name (repeatable, case-insensitive).
 - `--email` filters by author email (repeatable, case-insensitive).
-- `--first-parent` limits the analysis to first-parent commits.
+- `--all` includes all commits (default is first-parent only).
 
 #### Example
 ```

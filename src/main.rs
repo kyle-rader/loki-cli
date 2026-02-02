@@ -73,9 +73,9 @@ struct RepoStatsOptions {
     #[clap(long, default_value_t = 20)]
     top: usize,
 
-    /// Only include first-parent commits.
+    /// Include all commits (disables first-parent-only filtering).
     #[clap(long, default_value = "false")]
-    first_parent: bool,
+    all: bool,
 
     /// Only include commits authored by these names (repeatable, case-insensitive fuzzy match).
     #[clap(long = "name", value_name = "NAME")]
@@ -236,7 +236,7 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
         options.emails.iter().map(|s| s.to_lowercase()).collect();
 
     let mut git_args: Vec<String> = vec!["log".to_string()];
-    if options.first_parent {
+    if !options.all {
         git_args.push("--first-parent".to_string());
     }
     git_args.push("--pretty=format:%ct%x09%an%x09%ae".to_string());
@@ -343,14 +343,14 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
     progress.finish();
 
     if totals.is_empty() {
-        if options.first_parent {
+        if options.all {
             println!(
-                "No first-parent commits found between {} and {}.",
+                "No commits found between {} and {}.",
                 range.start_label, range.end_label
             );
         } else {
             println!(
-                "No commits found between {} and {}.",
+                "No first-parent commits found between {} and {}.",
                 range.start_label, range.end_label
             );
         }
