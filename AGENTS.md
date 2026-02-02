@@ -3,6 +3,7 @@
 Whenever an automated agent lands code in this repository, it must also:
 
 - Bump the crate version in `Cargo.toml` before shipping.
+- Run `cargo build` so `Cargo.lock` is updated, and commit any lockfile changes.
 - Choose the bump size using semantic versioning rules:
   - Increment the **major** version (`x.0.0`) for breaking changes.
   - Increment the **minor** version when adding backward-compatible functionality.
