@@ -138,3 +138,24 @@ where
 {
     Ok(git_command_iter(name, args)?.collect())
 }
+
+/// Execute a git command and return its stdout as a trimmed string.
+/// Returns an error if the command fails (non-zero exit) or produces no stdout.
+pub fn git_command_stdout<I, S>(name: &str, args: I) -> Result<String, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let output = Command::new(GIT)
+        .args(args)
+        .output()
+        .map_err(|err| format!("{name} failed: {err}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("{name} failed: {}", stderr.trim()));
+    }
+
+    let stdout = String::from_utf8(output.stdout).map_err(|e| format!("{e}"))?;
+    Ok(stdout.trim().to_string())
+}

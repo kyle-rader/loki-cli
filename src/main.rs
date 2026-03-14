@@ -1,5 +1,7 @@
 pub mod git;
 pub mod pruning;
+pub mod vars;
+pub mod worktree;
 
 use std::{
     collections::HashMap,
@@ -31,7 +33,7 @@ fn styles() -> clap::builder::Styles {
         .placeholder(AnsiColor::Cyan.on_default())
 }
 
-const NO_HOOKS: &str = "core.hooksPath=/dev/null";
+use vars::{LOKI_NEW_PREFIX, NO_HOOKS};
 
 #[derive(Debug, Parser)]
 struct CommitOptions {
@@ -92,6 +94,53 @@ enum RepoSubcommand {
     /// Analyze commits by author over time.
     #[clap(name = "stats")]
     Stats(RepoStatsOptions),
+}
+
+#[derive(Debug, Subcommand)]
+enum WorktreeSubcommand {
+    /// Create a new worktree and branch.
+    #[clap(visible_alias = "a")]
+    Add {
+        /// Optional prefix to prepend to the branch name.
+        #[clap(long, env = "LOKI_NEW_PREFIX")]
+        prefix: Option<String>,
+
+        /// Base ref to create the worktree from.
+        #[clap(short, long, default_value = "origin/main", env = "LOKI_WORKTREE_BASE")]
+        base: String,
+
+        /// Name parts joined with dashes to form the worktree and branch name.
+        name: Vec<String>,
+    },
+
+    /// Remove a worktree and its associated branch.
+    #[clap(visible_alias = "r")]
+    Remove {
+        /// Optional prefix used when the branch was created.
+        #[clap(long, env = "LOKI_NEW_PREFIX")]
+        prefix: Option<String>,
+
+        /// Force removal of a dirty worktree.
+        #[clap(short, long)]
+        force: bool,
+
+        /// Worktree name. If omitted, inferred from the current directory.
+        name: Vec<String>,
+    },
+
+    /// List all worktrees.
+    #[clap(visible_alias = "l")]
+    List,
+
+    /// Print a cd command for switching to a worktree (use with eval).
+    ///
+    /// bash/zsh: eval "$(lk w s <name>)"
+    /// PowerShell: lk w s <name> | Invoke-Expression
+    #[clap(visible_alias = "s")]
+    Switch {
+        /// Worktree name. If omitted, switches to the main worktree.
+        name: Vec<String>,
+    },
 }
 
 #[derive(Parser)]
@@ -159,12 +208,17 @@ enum Cli {
         command: RepoSubcommand,
     },
 
+    /// Manage git worktrees.
+    #[clap(visible_alias = "w")]
+    Worktree {
+        #[clap(subcommand)]
+        command: WorktreeSubcommand,
+    },
+
     /// Push the main branch to the release branch.
     #[clap(visible_alias = "r")]
     Release,
 }
-
-const LOKI_NEW_PREFIX: &str = "LOKI_NEW_PREFIX";
 
 fn main() -> Result<(), String> {
     let cli = Cli::parse();
@@ -181,6 +235,18 @@ fn main() -> Result<(), String> {
         Cli::Repo {
             command: RepoSubcommand::Stats(options),
         } => repo_stats(options),
+        Cli::Worktree { command } => match command {
+            WorktreeSubcommand::Add { name, base, prefix } => {
+                worktree::worktree_add(name, base, prefix.as_deref())
+            }
+            WorktreeSubcommand::Remove {
+                name,
+                force,
+                prefix,
+            } => worktree::worktree_remove(name, *force, prefix.as_deref()),
+            WorktreeSubcommand::List => worktree::worktree_list(),
+            WorktreeSubcommand::Switch { name } => worktree::worktree_switch(name),
+        },
         Cli::Release => release(),
     }
 }
