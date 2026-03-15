@@ -33,7 +33,7 @@ fn styles() -> clap::builder::Styles {
         .placeholder(AnsiColor::Cyan.on_default())
 }
 
-use vars::{LOKI_NEW_PREFIX, NO_HOOKS};
+use vars::{LOKI_NEW_PREFIX, LOKI_WORKTREE_BASE, NO_HOOKS};
 
 #[derive(Debug, Parser)]
 struct CommitOptions {
@@ -102,11 +102,11 @@ enum WorktreeSubcommand {
     #[clap(visible_alias = "a")]
     Add {
         /// Optional prefix to prepend to the branch name.
-        #[clap(long, env = "LOKI_NEW_PREFIX")]
+        #[clap(long, env = LOKI_NEW_PREFIX)]
         prefix: Option<String>,
 
         /// Base ref to create the worktree from.
-        #[clap(short, long, default_value = "origin/main", env = "LOKI_WORKTREE_BASE")]
+        #[clap(short, long, default_value = "origin/main", env = LOKI_WORKTREE_BASE)]
         base: String,
 
         /// Name parts joined with dashes to form the worktree and branch name.
@@ -117,7 +117,7 @@ enum WorktreeSubcommand {
     #[clap(visible_alias = "r")]
     Remove {
         /// Optional prefix used when the branch was created.
-        #[clap(long, env = "LOKI_NEW_PREFIX")]
+        #[clap(long, env = LOKI_NEW_PREFIX)]
         prefix: Option<String>,
 
         /// Force removal of a dirty worktree.

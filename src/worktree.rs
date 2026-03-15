@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use colored::Colorize;
 
-use crate::git::{git_command_status, git_command_stdout, git_commands_status};
+use crate::git::{git_command_iter, git_command_status, git_commands_status};
 use crate::vars::LOKI_NEW_PREFIX;
 
 // ---------------------------------------------------------------------------
@@ -20,32 +20,29 @@ pub fn infer_worktree_name(dir_name: &str) -> &str {
 
 /// Returns the main (first) worktree path via `git worktree list --porcelain`.
 fn resolve_main_worktree() -> Result<String, String> {
-    let output = git_command_stdout("list worktrees", vec!["worktree", "list", "--porcelain"])?;
-    output
-        .lines()
-        .next()
-        .and_then(|line| line.strip_prefix("worktree "))
-        .map(|s| s.to_string())
+    git_command_iter("list worktrees", vec!["worktree", "list", "--porcelain"])?
+        .find_map(|line| line.strip_prefix("worktree ").map(|s| s.to_string()))
         .ok_or_else(|| String::from("Could not determine main worktree from git worktree list"))
 }
 
 /// Builds a sibling worktree path: `<parent>/<repo_name>_<name>`.
-fn worktree_path(repo_root: &str, name: &str) -> PathBuf {
+fn worktree_path(repo_root: &str, name: &str) -> Result<PathBuf, String> {
     let root = Path::new(repo_root);
     let repo_name = root
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let parent = root.parent().unwrap_or(root);
-    parent.join(format!("{repo_name}_{name}"))
+        .ok_or_else(|| format!("Could not determine repo name from path: {repo_root}"))?;
+    let parent = root
+        .parent()
+        .ok_or_else(|| format!("Could not determine parent directory of: {repo_root}"))?;
+    Ok(parent.join(format!("{repo_name}_{name}")))
 }
 
 /// Finds a worktree whose directory ends with `_<name>` or equals `<name>`.
 fn resolve_worktree_by_name(name: &str) -> Result<String, String> {
-    let output = git_command_stdout("list worktrees", vec!["worktree", "list", "--porcelain"])?;
     let suffix = format!("_{name}");
 
-    for line in output.lines() {
+    for line in git_command_iter("list worktrees", vec!["worktree", "list", "--porcelain"])? {
         if let Some(path) = line.strip_prefix("worktree ") {
             let dir = Path::new(path)
                 .file_name()
@@ -78,7 +75,7 @@ pub fn worktree_add(name: &[String], base: &str, prefix: Option<&str>) -> Result
 
     let mut name = name.join("-");
     let main_root = resolve_main_worktree()?;
-    let wt_path = worktree_path(&main_root, &name);
+    let wt_path = worktree_path(&main_root, &name)?;
     let wt_path_str = wt_path.to_string_lossy();
 
     if wt_path.exists() {
@@ -134,15 +131,15 @@ pub fn worktree_remove(name: &[String], force: bool, prefix: Option<&str>) -> Re
         name.join("-")
     };
 
-    let wt_path = worktree_path(&main_root, &name);
+    let wt_path = worktree_path(&main_root, &name)?;
 
     // Fall back to plain name if the <repo>_<name> path doesn't exist
     let wt_path = if wt_path.exists() {
         wt_path
     } else {
-        let parent = Path::new(&main_root)
+        let parent = wt_path
             .parent()
-            .unwrap_or(Path::new(&main_root));
+            .ok_or_else(|| format!("Could not determine parent of: {}", wt_path.to_string_lossy()))?;
         let fallback = parent.join(&name);
         if !fallback.exists() {
             return Err(format!(
@@ -205,16 +202,14 @@ pub fn worktree_switch(name: &[String]) -> Result<(), String> {
 
 /// Lists all worktrees, highlighting the current one.
 pub fn worktree_list() -> Result<(), String> {
-    let output = git_command_stdout("worktree list", vec!["worktree", "list"])?;
-
     let cwd = std::env::current_dir()
         .ok()
         .map(|p| normalize_path(&p.to_string_lossy()));
 
-    for line in output.lines() {
+    for line in git_command_iter("worktree list", vec!["worktree", "list"])? {
         let is_current = cwd
             .as_ref()
-            .is_some_and(|c| normalize_path(line).starts_with(c.as_str()));
+            .is_some_and(|c| normalize_path(&line).starts_with(c.as_str()));
 
         if is_current {
             println!("{}", line.green().bold());
@@ -259,17 +254,17 @@ mod tests {
 
     #[test]
     fn worktree_path_basic() {
-        #[cfg(windows)]
-        let root = r"C:\repos\my-project";
-        #[cfg(not(windows))]
-        let root = "/home/user/repos/my-project";
+        let root = Path::new("repos").join("my-project");
+        let path = worktree_path(root.to_str().unwrap(), "fix-auth").unwrap();
+        let expected = Path::new("repos").join("my-project_fix-auth");
+        assert_eq!(path, expected);
+    }
 
-        let path = worktree_path(root, "fix-auth");
-
-        #[cfg(windows)]
-        assert_eq!(path, PathBuf::from(r"C:\repos\my-project_fix-auth"));
-        #[cfg(not(windows))]
-        assert_eq!(path, PathBuf::from("/home/user/repos/my-project_fix-auth"));
+    #[test]
+    fn worktree_path_errors_on_bare_root() {
+        // A bare root like "/" or "C:\" has no file_name component
+        let result = worktree_path("/", "fix-auth");
+        assert!(result.is_err());
     }
 
     #[test]
