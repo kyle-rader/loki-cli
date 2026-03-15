@@ -152,7 +152,7 @@ Print a `cd` command for switching to a worktree. Designed for use with `eval`:
 eval "$(lk w s fix-auth)"
 
 # PowerShell
-lk w s fix-auth | Invoke-Expression
+lk w s fix-auth | iex
 
 # Switch to the main worktree (no name)
 eval "$(lk w s)"
@@ -165,7 +165,7 @@ pipe to your shell for automatic directory switching:
 
 ```powershell
 # PowerShell
-lk w a fix-auth | Invoke-Expression
+lk w a fix-auth | iex
 ```
 
 ```bash
