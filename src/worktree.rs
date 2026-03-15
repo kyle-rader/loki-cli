@@ -200,21 +200,57 @@ pub fn worktree_switch(name: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// Lists all worktrees, highlighting the current one.
+/// Lists all worktrees, highlighting the current one and showing switch hints.
 pub fn worktree_list() -> Result<(), String> {
     let cwd = std::env::current_dir()
         .ok()
         .map(|p| normalize_path(&p.to_string_lossy()));
 
-    for line in git_command_iter("worktree list", vec!["worktree", "list"])? {
+    // Parse porcelain output into (path, branch) pairs
+    let mut entries: Vec<(String, Option<String>)> = Vec::new();
+    let mut current_path: Option<String> = None;
+    let mut current_branch: Option<String> = None;
+
+    for line in git_command_iter("worktree list", vec!["worktree", "list", "--porcelain"])? {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            current_path = Some(path.to_string());
+        } else if let Some(branch) = line.strip_prefix("branch refs/heads/") {
+            current_branch = Some(branch.to_string());
+        } else if line.is_empty() {
+            if let Some(path) = current_path.take() {
+                entries.push((path, current_branch.take()));
+            }
+            current_branch = None;
+        }
+    }
+    // Flush last entry (porcelain may not end with a blank line)
+    if let Some(path) = current_path.take() {
+        entries.push((path, current_branch.take()));
+    }
+
+    for (path, branch) in &entries {
+        let dir_name = Path::new(path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let name = infer_worktree_name(&dir_name);
+        let branch_label = branch
+            .as_deref()
+            .map(|b| format!(" [{b}]"))
+            .unwrap_or_default();
+
         let is_current = cwd
             .as_ref()
-            .is_some_and(|c| normalize_path(&line).starts_with(c.as_str()));
+            .is_some_and(|c| {
+                let normalized = normalize_path(path);
+                *c == normalized || c.starts_with(&format!("{normalized}/"))
+            });
 
         if is_current {
-            println!("{}", line.green().bold());
+            println!("{}", format!("* {name}{branch_label}").green().bold());
         } else {
-            println!("{line}");
+            let hint = format!("lk w s {name}").dimmed();
+            println!("  {name}{branch_label}  {hint}");
         }
     }
 
