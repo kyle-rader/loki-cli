@@ -4,6 +4,7 @@ use colored::Colorize;
 
 use crate::git::{git_command_iter, git_command_status, git_commands_status};
 use crate::vars::LOKI_NEW_PREFIX;
+use dialoguer::FuzzySelect;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -60,6 +61,66 @@ fn resolve_worktree_by_name(name: &str) -> Result<String, String> {
 /// Normalizes path separators to forward slashes for cross-platform comparison.
 fn normalize_path(path: &str) -> String {
     path.replace('\\', "/")
+}
+
+/// A parsed worktree entry from porcelain output.
+struct WorktreeEntry {
+    path: String,
+    name: String,
+    branch: Option<String>,
+}
+
+impl WorktreeEntry {
+    fn display_label(&self) -> String {
+        match &self.branch {
+            Some(b) => format!("{} [{b}]", self.name),
+            None => self.name.clone(),
+        }
+    }
+}
+
+/// Parses `git worktree list --porcelain` into structured entries.
+fn list_worktree_entries() -> Result<Vec<WorktreeEntry>, String> {
+    let mut entries = Vec::new();
+    let mut current_path: Option<String> = None;
+    let mut current_branch: Option<String> = None;
+
+    for line in git_command_iter("worktree list", vec!["worktree", "list", "--porcelain"])? {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            current_path = Some(path.to_string());
+        } else if let Some(branch) = line.strip_prefix("branch refs/heads/") {
+            current_branch = Some(branch.to_string());
+        } else if line.is_empty() {
+            if let Some(path) = current_path.take() {
+                let dir = Path::new(&path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let name = infer_worktree_name(&dir).to_string();
+                entries.push(WorktreeEntry {
+                    path,
+                    name,
+                    branch: current_branch.take(),
+                });
+            }
+            current_branch = None;
+        }
+    }
+    // Flush last entry (porcelain may not end with a blank line)
+    if let Some(path) = current_path.take() {
+        let dir = Path::new(&path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let name = infer_worktree_name(&dir).to_string();
+        entries.push(WorktreeEntry {
+            path,
+            name,
+            branch: current_branch.take(),
+        });
+    }
+
+    Ok(entries)
 }
 
 // ---------------------------------------------------------------------------
@@ -187,11 +248,23 @@ pub fn worktree_remove(name: &[String], force: bool, prefix: Option<&str>) -> Re
     Ok(())
 }
 
-/// Outputs `cd <path>` for the named worktree, or the main worktree if no
-/// name is given. Designed for `eval` / `Invoke-Expression` piping.
+/// Outputs `cd <path>` for the named worktree. If no name is given, shows an
+/// interactive fuzzy picker. Designed for `eval` / `Invoke-Expression` piping.
 pub fn worktree_switch(name: &[String]) -> Result<(), String> {
     let target = if name.is_empty() {
-        resolve_main_worktree()?
+        let entries = list_worktree_entries()?;
+        if entries.len() <= 1 {
+            return Err(String::from("No other worktrees to switch to."));
+        }
+
+        let labels: Vec<String> = entries.iter().map(|e| e.display_label()).collect();
+        let selection = FuzzySelect::new()
+            .with_prompt("Switch to worktree")
+            .items(&labels)
+            .interact()
+            .map_err(|e| format!("Selection cancelled: {e}"))?;
+
+        entries[selection].path.clone()
     } else {
         resolve_worktree_by_name(&name.join("-"))?
     };
@@ -206,51 +279,20 @@ pub fn worktree_list() -> Result<(), String> {
         .ok()
         .map(|p| normalize_path(&p.to_string_lossy()));
 
-    // Parse porcelain output into (path, branch) pairs
-    let mut entries: Vec<(String, Option<String>)> = Vec::new();
-    let mut current_path: Option<String> = None;
-    let mut current_branch: Option<String> = None;
+    let entries = list_worktree_entries()?;
 
-    for line in git_command_iter("worktree list", vec!["worktree", "list", "--porcelain"])? {
-        if let Some(path) = line.strip_prefix("worktree ") {
-            current_path = Some(path.to_string());
-        } else if let Some(branch) = line.strip_prefix("branch refs/heads/") {
-            current_branch = Some(branch.to_string());
-        } else if line.is_empty() {
-            if let Some(path) = current_path.take() {
-                entries.push((path, current_branch.take()));
-            }
-            current_branch = None;
-        }
-    }
-    // Flush last entry (porcelain may not end with a blank line)
-    if let Some(path) = current_path.take() {
-        entries.push((path, current_branch.take()));
-    }
+    for entry in &entries {
+        let is_current = cwd.as_ref().is_some_and(|c| {
+            let normalized = normalize_path(&entry.path);
+            *c == normalized || c.starts_with(&format!("{normalized}/"))
+        });
 
-    for (path, branch) in &entries {
-        let dir_name = Path::new(path)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
-        let name = infer_worktree_name(&dir_name);
-        let branch_label = branch
-            .as_deref()
-            .map(|b| format!(" [{b}]"))
-            .unwrap_or_default();
-
-        let is_current = cwd
-            .as_ref()
-            .is_some_and(|c| {
-                let normalized = normalize_path(path);
-                *c == normalized || c.starts_with(&format!("{normalized}/"))
-            });
-
+        let label = entry.display_label();
         if is_current {
-            println!("{}", format!("* {name}{branch_label}").green().bold());
+            println!("{}", format!("* {label}").green().bold());
         } else {
-            let hint = format!("lk w s {name}").dimmed();
-            println!("  {name}{branch_label}  {hint}");
+            let hint = format!("lk w s {}", entry.name).dimmed();
+            println!("  {label}  {hint}");
         }
     }
 
