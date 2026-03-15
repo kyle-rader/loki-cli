@@ -1,10 +1,10 @@
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use colored::Colorize;
 
 use crate::git::{git_command_iter, git_command_status, git_commands_status};
 use crate::vars::LOKI_NEW_PREFIX;
-use dialoguer::FuzzySelect;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -85,29 +85,7 @@ fn list_worktree_entries() -> Result<Vec<WorktreeEntry>, String> {
     let mut current_path: Option<String> = None;
     let mut current_branch: Option<String> = None;
 
-    for line in git_command_iter("worktree list", vec!["worktree", "list", "--porcelain"])? {
-        if let Some(path) = line.strip_prefix("worktree ") {
-            current_path = Some(path.to_string());
-        } else if let Some(branch) = line.strip_prefix("branch refs/heads/") {
-            current_branch = Some(branch.to_string());
-        } else if line.is_empty() {
-            if let Some(path) = current_path.take() {
-                let dir = Path::new(&path)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                let name = infer_worktree_name(&dir).to_string();
-                entries.push(WorktreeEntry {
-                    path,
-                    name,
-                    branch: current_branch.take(),
-                });
-            }
-            current_branch = None;
-        }
-    }
-    // Flush last entry (porcelain may not end with a blank line)
-    if let Some(path) = current_path.take() {
+    let mut flush = |path: String, branch: Option<String>| {
         let dir = Path::new(&path)
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
@@ -116,8 +94,24 @@ fn list_worktree_entries() -> Result<Vec<WorktreeEntry>, String> {
         entries.push(WorktreeEntry {
             path,
             name,
-            branch: current_branch.take(),
+            branch,
         });
+    };
+
+    for line in git_command_iter("worktree list", vec!["worktree", "list", "--porcelain"])? {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            current_path = Some(path.to_string());
+        } else if let Some(branch) = line.strip_prefix("branch refs/heads/") {
+            current_branch = Some(branch.to_string());
+        } else if line.is_empty() {
+            if let Some(path) = current_path.take() {
+                flush(path, current_branch.take());
+            }
+            current_branch = None;
+        }
+    }
+    if let Some(path) = current_path.take() {
+        flush(path, current_branch.take());
     }
 
     Ok(entries)
@@ -248,31 +242,28 @@ pub fn worktree_remove(name: &[String], force: bool, prefix: Option<&str>) -> Re
     Ok(())
 }
 
-/// Outputs `cd <path>` for the named worktree. If no name is given, shows an
-/// interactive fuzzy picker. Designed for `eval` / `Invoke-Expression` piping.
+/// Outputs `cd <path>` for the named worktree, or the main worktree if no
+/// name is given. Designed for `eval` / `Invoke-Expression` piping.
 pub fn worktree_switch(name: &[String]) -> Result<(), String> {
     let target = if name.is_empty() {
-        let entries = list_worktree_entries()?;
-        if entries.len() <= 1 {
-            return Err(String::from("No other worktrees to switch to."));
-        }
-
-        let labels: Vec<String> = entries.iter().map(|e| e.display_label()).collect();
-        let selection = FuzzySelect::new()
-            .with_prompt("Switch to worktree")
-            .items(&labels)
-            .interact()
-            .map_err(|e| format!("Selection cancelled: {e}"))?;
-
-        entries[selection].path.clone()
+        resolve_main_worktree()?
     } else {
         resolve_worktree_by_name(&name.join("-"))?
     };
 
     println!("cd {target}");
+
+    if std::io::stdout().is_terminal() {
+        let example = if cfg!(windows) {
+            "lk w s | iex"
+        } else {
+            "eval \"$(lk w s)\""
+        };
+        eprintln!("\n{}", format!("Tip: pipe to switch automatically: {example}").dimmed());
+    }
+
     Ok(())
 }
-
 /// Lists all worktrees, highlighting the current one and showing switch hints.
 pub fn worktree_list() -> Result<(), String> {
     let cwd = std::env::current_dir()
@@ -291,12 +282,21 @@ pub fn worktree_list() -> Result<(), String> {
         if is_current {
             println!("{}", format!("* {label}").green().bold());
         } else {
-            let hint = format!("lk w s {}", entry.name).dimmed();
+            let hint = switch_hint(&entry.name).dimmed();
             println!("  {label}  {hint}");
         }
     }
 
     Ok(())
+}
+
+/// Returns the platform-appropriate command to switch to a worktree.
+fn switch_hint(name: &str) -> String {
+    if cfg!(windows) {
+        format!("lk w s {name} | iex")
+    } else {
+        format!("eval \"$(lk w s {name})\"")
+    }
 }
 
 // ---------------------------------------------------------------------------
