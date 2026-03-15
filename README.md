@@ -135,10 +135,13 @@ Remove a worktree and delete its local branch.
 - `--prefix` — Branch name prefix used during creation (env: `LOKI_NEW_PREFIX`)
 
 #### `worktree list` (alias: `l`)
-List all worktrees. Highlights the current worktree in green.
+List all worktrees. The current worktree is highlighted in green, and other
+worktrees show a copy-paste command to switch to them:
 
-```sh
+```
 ❯ lk w l
+* my-project [main]
+  fix-auth [users/dan/fix-auth]  lk w s fix-auth | iex
 ```
 
 #### `worktree switch [name]` (alias: `s`)
