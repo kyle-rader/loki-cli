@@ -33,7 +33,7 @@ fn styles() -> clap::builder::Styles {
         .placeholder(AnsiColor::Cyan.on_default())
 }
 
-use vars::{LOKI_NEW_PREFIX, LOKI_WORKTREE_BASE, NO_HOOKS};
+use vars::{LOKI_NEW_PREFIX, LOKI_REBASE_TARGET, LOKI_WORKTREE_BASE, NO_HOOKS};
 
 #[derive(Debug, Parser)]
 struct CommitOptions {
@@ -151,7 +151,7 @@ enum Cli {
     #[clap(visible_alias = "n")]
     New {
         /// Optional prefix to prepend to the generated branch name.
-        #[clap(long, env = "LOKI_NEW_PREFIX")]
+        #[clap(long, env = LOKI_NEW_PREFIX)]
         prefix: Option<String>,
 
         /// List of names to join with dashes to form a valid branch name.
@@ -187,7 +187,7 @@ enum Cli {
     /// Rebase the current branch onto the target branch after fetching.
     Rebase {
         /// The branch to rebase onto.
-        #[clap(default_value = "main", env = "LOKI_REBASE_TARGET")]
+        #[clap(default_value = "main", env = LOKI_REBASE_TARGET)]
         target: String,
 
         /// Start an interactive rebase.
