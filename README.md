@@ -108,9 +108,13 @@ Create a new worktree as a sibling directory and set up a branch with upstream t
 
 # With a branch prefix (via flag or LOKI_NEW_PREFIX env var)
 ❯ lk w a fix-auth --prefix users/danigon/
+
+# Check out an existing remote branch into a worktree
+❯ lk w a review-feature -b users/teammate/cool-feature
 ```
 
-The worktree is created at `<parent>/<repo>_<name>` (e.g., `~/repos/my-project_fix-auth`).
+If `-b` points to an existing remote branch, the branch is checked out directly
+instead of creating a new one.
 
 **Flags:**
 - `--base` / `-b` — Base ref (default: `origin/main`, env: `LOKI_WORKTREE_BASE`)

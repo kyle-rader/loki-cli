@@ -20,6 +20,34 @@ where
     Ok(())
 }
 
+/// Execute the git command with stdout suppressed. Stderr is captured and
+/// included in error messages. Use when stdout must stay clean for piping.
+pub fn git_command_status_quiet<I, S>(name: &str, args: I) -> Result<(), String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let args: Vec<_> = args.into_iter().collect();
+    let args_display: Vec<_> = args.iter().map(|a| a.as_ref().to_string_lossy()).collect();
+
+    let output = Command::new(GIT)
+        .args(&args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("{name} failed to run: git {}\n{e}", args_display.join(" ")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "{name} failed: git {}\n{}",
+            args_display.join(" "),
+            stderr.trim()
+        ));
+    }
+    Ok(())
+}
+
 /// Execute the git command and return an iterator over its output lines (both stdout and stderr) as they arrive.
 pub fn git_command_stream<I, S>(name: &str, args: I) -> Result<impl Iterator<Item = String>, String>
 where

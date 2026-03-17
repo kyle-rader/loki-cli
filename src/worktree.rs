@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use colored::Colorize;
 
-use crate::git::{git_command_iter, git_command_status, git_commands_status};
+use crate::git::{git_command_iter, git_command_lines, git_command_status_quiet};
 use crate::vars::LOKI_NEW_PREFIX;
 
 // ---------------------------------------------------------------------------
@@ -61,6 +61,31 @@ fn resolve_worktree_by_name(name: &str) -> Result<String, String> {
 /// Normalizes path separators to forward slashes for cross-platform comparison.
 fn normalize_path(path: &str) -> String {
     path.replace('\\', "/")
+}
+
+/// Checks if a ref matches an existing remote branch on origin.
+/// Returns the full remote ref (e.g. `origin/branch-name`) if found.
+fn find_remote_branch(name: &str) -> Option<String> {
+    // Check common forms: bare name, origin/name, or full ref
+    let candidates = if name.starts_with("origin/") {
+        vec![name.to_string()]
+    } else if name.starts_with("refs/") {
+        vec![name.strip_prefix("refs/heads/").unwrap_or(name).to_string()]
+    } else {
+        vec![name.to_string()]
+    };
+
+    for candidate in &candidates {
+        let lines = git_command_lines(
+            "ls-remote",
+            vec!["ls-remote", "--heads", "origin", candidate.as_str()],
+        )
+        .unwrap_or_default();
+        if !lines.is_empty() {
+            return Some(format!("origin/{candidate}"));
+        }
+    }
+    None
 }
 
 /// A parsed worktree entry from porcelain output.
@@ -122,7 +147,8 @@ fn list_worktree_entries() -> Result<Vec<WorktreeEntry>, String> {
 // ---------------------------------------------------------------------------
 
 /// Creates a worktree at `<parent>/<repo>_<name>`, then creates and pushes a
-/// branch with optional prefix. Outputs `cd <path>` to stdout for piping.
+/// branch with optional prefix. If the base ref is an existing remote branch,
+/// checks it out directly instead. Outputs `cd <path>` to stdout for piping.
 pub fn worktree_add(name: &[String], base: &str, prefix: Option<&str>) -> Result<(), String> {
     if name.is_empty() {
         return Err(String::from("name cannot be empty."));
@@ -137,13 +163,38 @@ pub fn worktree_add(name: &[String], base: &str, prefix: Option<&str>) -> Result
         return Err(format!("Worktree path already exists: {wt_path_str}"));
     }
 
+    // Check if the base is an existing remote branch to check out directly
+    if let Some(remote_ref) = find_remote_branch(base) {
+        eprintln!(
+            "Found existing branch {} — checking out into worktree",
+            base.cyan()
+        );
+        git_command_status_quiet("fetch", vec!["fetch", "origin"])?;
+        git_command_status_quiet(
+            "worktree add",
+            vec![
+                "worktree",
+                "add",
+                "--track",
+                "-b",
+                base,
+                wt_path_str.as_ref(),
+                remote_ref.as_str(),
+            ],
+        )?;
+
+        eprintln!("\n{}", "Worktree ready!".green().bold());
+        println!("cd {wt_path_str}");
+        return Ok(());
+    }
+
+    // New branch flow
     eprintln!("Creating worktree at {}", wt_path_str.green());
-    git_command_status(
+    git_command_status_quiet(
         "worktree add",
         vec!["worktree", "add", wt_path_str.as_ref(), base],
     )?;
 
-    // Set process cwd so branch creation runs inside the new worktree
     std::env::set_current_dir(&wt_path)
         .map_err(|e| format!("Failed to enter worktree directory: {e}"))?;
 
@@ -152,13 +203,11 @@ pub fn worktree_add(name: &[String], base: &str, prefix: Option<&str>) -> Result
         name = format!("{prefix}{name}");
     }
 
-    git_commands_status(vec![
-        ("create branch", vec!["switch", "--create", name.as_str()]),
-        (
-            "push to origin",
-            vec!["push", "--set-upstream", "origin", name.as_str()],
-        ),
-    ])?;
+    git_command_status_quiet("create branch", vec!["switch", "--create", name.as_str()])?;
+    git_command_status_quiet(
+        "push to origin",
+        vec!["push", "--set-upstream", "origin", name.as_str()],
+    )?;
 
     eprintln!("\n{}", "Worktree ready!".green().bold());
     println!("cd {wt_path_str}");
@@ -221,7 +270,7 @@ pub fn worktree_remove(name: &[String], force: bool, prefix: Option<&str>) -> Re
         remove_args.push("--force");
     }
     remove_args.push(wt_path_str.as_ref());
-    git_command_status("worktree remove", remove_args)?;
+    git_command_status_quiet("worktree remove", remove_args)?;
     eprintln!("Removed worktree {}", wt_path_str.red());
 
     // Best-effort branch cleanup — may already be gone
@@ -230,7 +279,7 @@ pub fn worktree_remove(name: &[String], force: bool, prefix: Option<&str>) -> Re
         None => name,
     };
 
-    match git_command_status("delete branch", vec!["branch", "-D", branch.as_str()]) {
+    match git_command_status_quiet("delete branch", vec!["branch", "-D", branch.as_str()]) {
         Ok(()) => eprintln!("Deleted branch {}", branch.red()),
         Err(_) => eprintln!(
             "Branch {} not found locally (may already be deleted)",
