@@ -116,10 +116,6 @@ enum WorktreeSubcommand {
     /// Remove a worktree and its associated branch.
     #[clap(visible_alias = "r")]
     Remove {
-        /// Optional prefix used when the branch was created.
-        #[clap(long, env = LOKI_NEW_PREFIX)]
-        prefix: Option<String>,
-
         /// Force removal of a dirty worktree.
         #[clap(short, long)]
         force: bool,
@@ -239,11 +235,9 @@ fn main() -> Result<(), String> {
             WorktreeSubcommand::Add { name, base, prefix } => {
                 worktree::worktree_add(name, base, prefix.as_deref())
             }
-            WorktreeSubcommand::Remove {
-                name,
-                force,
-                prefix,
-            } => worktree::worktree_remove(name, *force, prefix.as_deref()),
+            WorktreeSubcommand::Remove { name, force } => {
+                worktree::worktree_remove(name, *force)
+            }
             WorktreeSubcommand::List => worktree::worktree_list(),
             WorktreeSubcommand::Switch { name } => worktree::worktree_switch(name),
         },

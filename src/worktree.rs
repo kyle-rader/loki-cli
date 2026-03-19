@@ -63,6 +63,19 @@ fn normalize_path(path: &str) -> String {
     path.replace('\\', "/")
 }
 
+/// Outputs `cd <path>` to stdout. When stdout is a terminal (not piped),
+/// prints a platform-appropriate tip for piping.
+fn emit_cd(path: &str) {
+    println!("cd {path}");
+    if std::io::stdout().is_terminal() {
+        let hint = if cfg!(windows) { "| iex" } else { "through eval" };
+        eprintln!(
+            "\n{}",
+            format!("Tip: pipe this command {hint} to switch automatically.").dimmed()
+        );
+    }
+}
+
 /// Checks if a ref matches an existing remote branch on origin.
 /// Returns the full remote ref (e.g. `origin/branch-name`) if found.
 fn find_remote_branch(name: &str) -> Option<String> {
@@ -184,7 +197,7 @@ pub fn worktree_add(name: &[String], base: &str, prefix: Option<&str>) -> Result
         )?;
 
         eprintln!("\n{}", "Worktree ready!".green().bold());
-        println!("cd {wt_path_str}");
+        emit_cd(&wt_path_str);
         return Ok(());
     }
 
@@ -210,7 +223,7 @@ pub fn worktree_add(name: &[String], base: &str, prefix: Option<&str>) -> Result
     )?;
 
     eprintln!("\n{}", "Worktree ready!".green().bold());
-    println!("cd {wt_path_str}");
+    emit_cd(&wt_path_str);
 
     Ok(())
 }
@@ -218,7 +231,7 @@ pub fn worktree_add(name: &[String], base: &str, prefix: Option<&str>) -> Result
 /// Removes a worktree and deletes its local branch. If `name` is empty the
 /// worktree name is inferred from the current directory. Outputs `cd <main>`
 /// to stdout for piping.
-pub fn worktree_remove(name: &[String], force: bool, prefix: Option<&str>) -> Result<(), String> {
+pub fn worktree_remove(name: &[String], force: bool) -> Result<(), String> {
     let main_root = resolve_main_worktree()?;
 
     let name = if name.is_empty() {
@@ -256,38 +269,69 @@ pub fn worktree_remove(name: &[String], force: bool, prefix: Option<&str>) -> Re
     };
     let wt_path_str = wt_path.to_string_lossy();
 
+    // Don't allow removing the main worktree
+    if normalize_path(&wt_path_str) == normalize_path(&main_root) {
+        return Err(String::from(
+            "You're in the main repo - only secondary worktrees can be removed.",
+        ));
+    }
+
+    // Look up the actual branch checked out in this worktree before removing
+    let actual_branch = list_worktree_entries()
+        .ok()
+        .and_then(|entries| {
+            let normalized_target = normalize_path(&wt_path_str);
+            entries
+                .into_iter()
+                .find(|e| normalize_path(&e.path) == normalized_target)
+                .and_then(|e| e.branch)
+        });
+
+    // Move out of the worktree so the OS can delete it
     if let Ok(cwd) = std::env::current_dir() {
         if cwd.starts_with(&wt_path) {
             eprintln!(
-                "{} You are inside the worktree being removed.",
-                "Warning:".yellow().bold(),
+                "Leaving worktree directory, moving to {}",
+                main_root.green()
             );
+            std::env::set_current_dir(&main_root)
+                .map_err(|e| format!("Failed to change to main worktree: {e}"))?;
         }
     }
 
+    // Attempt worktree removal — retry with --force on dirty worktree errors
     let mut remove_args = vec!["worktree", "remove"];
     if force {
         remove_args.push("--force");
     }
     remove_args.push(wt_path_str.as_ref());
-    git_command_status_quiet("worktree remove", remove_args)?;
+
+    if let Err(err) = git_command_status_quiet("worktree remove", remove_args) {
+        if !force && (err.contains("modified or untracked") || err.contains("contains modified")) {
+            return Err(format!(
+                "Worktree has uncommitted changes. Run with --force to remove anyway:\n  lk w r --force {}",
+                name
+            ));
+        }
+        return Err(err);
+    }
     eprintln!("Removed worktree {}", wt_path_str.red());
 
-    // Best-effort branch cleanup — may already be gone
-    let branch = match prefix {
-        Some(p) => format!("{p}{name}"),
-        None => name,
-    };
+    // Prune stale worktree refs so branch deletion succeeds
+    let _ = git_command_status_quiet("worktree prune", vec!["worktree", "prune"]);
 
-    match git_command_status_quiet("delete branch", vec!["branch", "-D", branch.as_str()]) {
-        Ok(()) => eprintln!("Deleted branch {}", branch.red()),
-        Err(_) => eprintln!(
-            "Branch {} not found locally (may already be deleted)",
-            branch.yellow()
-        ),
+    // Best-effort branch cleanup using the actual checked-out branch
+    if let Some(branch) = actual_branch {
+        match git_command_status_quiet("delete branch", vec!["branch", "-D", branch.as_str()]) {
+            Ok(()) => eprintln!("Deleted branch {}", branch.red()),
+            Err(_) => eprintln!(
+                "Branch {} not found locally (may already be deleted)",
+                branch.yellow()
+            ),
+        }
     }
 
-    println!("cd {main_root}");
+    emit_cd(&main_root);
     Ok(())
 }
 
@@ -300,17 +344,7 @@ pub fn worktree_switch(name: &[String]) -> Result<(), String> {
         resolve_worktree_by_name(&name.join("-"))?
     };
 
-    println!("cd {target}");
-
-    if std::io::stdout().is_terminal() {
-        let example = if cfg!(windows) {
-            "lk w s | iex"
-        } else {
-            "eval \"$(lk w s)\""
-        };
-        eprintln!("\n{}", format!("Tip: pipe to switch automatically: {example}").dimmed());
-    }
-
+    emit_cd(&target);
     Ok(())
 }
 /// Lists all worktrees, highlighting the current one and showing switch hints.
