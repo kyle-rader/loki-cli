@@ -201,7 +201,10 @@ pub fn worktree_add(name: &[String], base: &str, prefix: Option<&str>) -> Result
         return Ok(());
     }
 
-    // New branch flow
+    // New branch flow — fetch first so the base ref is up-to-date
+    eprintln!("Fetching latest from origin…");
+    git_command_status_quiet("fetch", vec!["fetch", "origin"])?;
+
     eprintln!("Creating worktree at {}", wt_path_str.green());
     git_command_status_quiet(
         "worktree add",
