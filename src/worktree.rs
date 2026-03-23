@@ -76,6 +76,80 @@ fn emit_cd(path: &str) {
     }
 }
 
+/// Verifies that the given path is a registered git worktree.
+fn verify_worktree_registered(path: &Path) -> Result<(), String> {
+    let normalized = normalize_path(&path.to_string_lossy());
+
+    for line in git_command_iter("list worktrees", vec!["worktree", "list", "--porcelain"])? {
+        if let Some(wt_path) = line.strip_prefix("worktree ") {
+            if normalize_path(wt_path) == normalized {
+                return Ok(());
+            }
+        }
+    }
+
+    Err(format!(
+        "Path '{}' is not a registered git worktree.\n\
+         Run `git worktree list` to see registered worktrees.",
+        path.display()
+    ))
+}
+
+/// Probes whether a directory can be removed by attempting a rename.
+/// On Windows, directories held open by a shell or other process cannot be
+/// renamed, so this detects locks *before* `git worktree remove` modifies any
+/// internal state.
+fn probe_directory_removable(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("Cannot determine parent of '{}'", path.display()))?;
+    let dir_name = path
+        .file_name()
+        .ok_or_else(|| format!("Cannot determine directory name of '{}'", path.display()))?;
+
+    let probe_name = format!(".{}.lk-removing", dir_name.to_string_lossy());
+    let probe_path = parent.join(&probe_name);
+
+    if probe_path.exists() {
+        return Err(format!(
+            "Found stale probe directory '{}' from a previous interrupted removal.\n\
+             Please manually rename it back to '{}' or delete it.",
+            probe_path.display(),
+            path.display()
+        ));
+    }
+
+    match std::fs::rename(path, &probe_path) {
+        Ok(()) => {
+            // Rename succeeded — directory is not locked. Rename it back.
+            std::fs::rename(&probe_path, path).map_err(|e| {
+                format!(
+                    "Renamed worktree directory for probe but failed to restore it.\n\
+                     Please manually rename '{}' back to '{}': {e}",
+                    probe_path.display(),
+                    path.display()
+                )
+            })
+        }
+        Err(e) => {
+            let hint = if cfg!(windows) {
+                " On Windows this usually means a shell or program has its working \
+                 directory inside the worktree. Close that terminal or `cd` elsewhere first."
+            } else {
+                ""
+            };
+            Err(format!(
+                "Cannot remove worktree: directory '{}' is locked: {e}.{hint}",
+                path.display()
+            ))
+        }
+    }
+}
+
 /// Checks if a ref matches an existing remote branch on origin.
 /// Returns the full remote ref (e.g. `origin/branch-name`) if found.
 fn find_remote_branch(name: &str) -> Option<String> {
@@ -272,12 +346,17 @@ pub fn worktree_remove(name: &[String], force: bool) -> Result<(), String> {
     };
     let wt_path_str = wt_path.to_string_lossy();
 
-    // Don't allow removing the main worktree
+    // -- Pre-validation: catch problems before git modifies any state --------
+
+    // 1. Refuse to remove the main worktree.
     if normalize_path(&wt_path_str) == normalize_path(&main_root) {
         return Err(String::from(
             "You're in the main repo - only secondary worktrees can be removed.",
         ));
     }
+
+    // 2. Verify the worktree is actually registered with git.
+    verify_worktree_registered(&wt_path)?;
 
     // Look up the actual branch checked out in this worktree before removing
     let actual_branch = list_worktree_entries()
@@ -290,7 +369,8 @@ pub fn worktree_remove(name: &[String], force: bool) -> Result<(), String> {
                 .and_then(|e| e.branch)
         });
 
-    // Move out of the worktree so the OS can delete it
+    // 3. If we are inside the worktree, move out first so our own process
+    //    does not hold a directory lock.
     if let Ok(cwd) = std::env::current_dir() {
         if cwd.starts_with(&wt_path) {
             eprintln!(
@@ -301,6 +381,12 @@ pub fn worktree_remove(name: &[String], force: bool) -> Result<(), String> {
                 .map_err(|e| format!("Failed to change to main worktree: {e}"))?;
         }
     }
+
+    // 4. Probe that the directory can actually be removed (rename test).
+    //    On Windows this catches locks held by other shells/processes.
+    probe_directory_removable(&wt_path)?;
+
+    // -- All checks passed — safe to proceed ---------------------------------
 
     // Attempt worktree removal — retry with --force on dirty worktree errors
     let mut remove_args = vec!["worktree", "remove"];
