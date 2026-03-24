@@ -33,7 +33,7 @@ fn styles() -> clap::builder::Styles {
         .placeholder(AnsiColor::Cyan.on_default())
 }
 
-use vars::{LOKI_NEW_PREFIX, LOKI_REBASE_TARGET, LOKI_WORKTREE_BASE, NO_HOOKS};
+use vars::{LOKI_NEW_PREFIX, LOKI_REBASE_TARGET, LOKI_WORKTREE_BRANCH, NO_HOOKS};
 
 #[derive(Debug, Parser)]
 struct CommitOptions {
@@ -114,9 +114,10 @@ enum WorktreeSubcommand {
         #[clap(long, env = LOKI_NEW_PREFIX)]
         prefix: Option<String>,
 
-        /// Base ref to create the worktree from.
-        #[clap(short, long, default_value = "origin/main", env = LOKI_WORKTREE_BASE)]
-        base: String,
+        /// Branch to check out if it exists on the remote, or the starting
+        /// point for a new branch.
+        #[clap(short, long, default_value = "origin/main", env = LOKI_WORKTREE_BRANCH)]
+        branch: String,
 
         /// Name parts joined with dashes to form the worktree and branch name.
         name: Vec<String>,
@@ -244,8 +245,8 @@ fn main() -> Result<(), String> {
             command: RepoSubcommand::Stats(options),
         } => repo_stats(options),
         Cli::Worktree { command } => match command {
-            WorktreeSubcommand::Add { name, base, prefix } => {
-                worktree::worktree_add(name, base, prefix.as_deref())
+            WorktreeSubcommand::Add { name, branch, prefix } => {
+                worktree::worktree_add(name, branch, prefix.as_deref())
             }
             WorktreeSubcommand::Remove { name, force } => worktree::worktree_remove(name, *force),
             WorktreeSubcommand::List => worktree::worktree_list(),

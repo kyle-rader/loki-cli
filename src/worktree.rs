@@ -234,9 +234,9 @@ fn list_worktree_entries() -> Result<Vec<WorktreeEntry>, String> {
 // ---------------------------------------------------------------------------
 
 /// Creates a worktree at `<parent>/<repo>_<name>`, then creates and pushes a
-/// branch with optional prefix. If the base ref is an existing remote branch,
+/// branch with optional prefix. If the branch is an existing remote branch,
 /// checks it out directly instead. Outputs `cd <path>` to stdout for piping.
-pub fn worktree_add(name: &[String], base: &str, prefix: Option<&str>) -> Result<(), String> {
+pub fn worktree_add(name: &[String], branch: &str, prefix: Option<&str>) -> Result<(), String> {
     if name.is_empty() {
         return Err(String::from("name cannot be empty."));
     }
@@ -250,11 +250,11 @@ pub fn worktree_add(name: &[String], base: &str, prefix: Option<&str>) -> Result
         return Err(format!("Worktree path already exists: {wt_path_str}"));
     }
 
-    // Check if the base is an existing remote branch to check out directly
-    if let Some(remote_ref) = find_remote_branch(base) {
+    // Check if the branch is an existing remote branch to check out directly
+    if let Some(remote_ref) = find_remote_branch(branch) {
         eprintln!(
             "Found existing branch {} — checking out into worktree",
-            base.cyan()
+            branch.cyan()
         );
         git_command_status_quiet("fetch", vec!["fetch", "origin"])?;
         git_command_status_quiet(
@@ -264,7 +264,7 @@ pub fn worktree_add(name: &[String], base: &str, prefix: Option<&str>) -> Result
                 "add",
                 "--track",
                 "-b",
-                base,
+                branch,
                 wt_path_str.as_ref(),
                 remote_ref.as_str(),
             ],
@@ -282,7 +282,7 @@ pub fn worktree_add(name: &[String], base: &str, prefix: Option<&str>) -> Result
     eprintln!("Creating worktree at {}", wt_path_str.green());
     git_command_status_quiet(
         "worktree add",
-        vec!["worktree", "add", wt_path_str.as_ref(), base],
+        vec!["worktree", "add", wt_path_str.as_ref(), branch],
     )?;
 
     std::env::set_current_dir(&wt_path)
