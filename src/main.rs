@@ -86,8 +86,17 @@ struct RepoStatsOptions {
     /// Only include commits authored by these emails (repeatable, case-insensitive fuzzy match).
     #[clap(long = "email", value_name = "EMAIL")]
     emails: Vec<String>,
-}
 
+    /// Disable patch-id-based deduplication of logically-identical commits.
+    ///
+    /// By default, `lk repo stats` collapses commits that share the same
+    /// `git patch-id` (different SHAs but identical patches) so that
+    /// migrated / rebased / cherry-picked history doesn't double-count
+    /// contributors. Pass `--no-dedup` to count every SHA individually
+    /// (the pre-2.5.0 behavior).
+    #[clap(long, default_value_t = false)]
+    no_dedup: bool,
+}
 
 #[derive(Debug, Subcommand)]
 enum RepoSubcommand {
@@ -226,7 +235,10 @@ fn main() -> Result<(), String> {
         Cli::Fetch => fetch_prune(),
         Cli::Save(commit_options) => save(commit_options),
         Cli::Commit(commit_options) => commit(commit_options),
-        Cli::Rebase { target, interactive } => rebase(target, *interactive),
+        Cli::Rebase {
+            target,
+            interactive,
+        } => rebase(target, *interactive),
         Cli::NoHooks { command } => no_hooks(command),
         Cli::Repo {
             command: RepoSubcommand::Stats(options),
@@ -235,9 +247,7 @@ fn main() -> Result<(), String> {
             WorktreeSubcommand::Add { name, base, prefix } => {
                 worktree::worktree_add(name, base, prefix.as_deref())
             }
-            WorktreeSubcommand::Remove { name, force } => {
-                worktree::worktree_remove(name, *force)
-            }
+            WorktreeSubcommand::Remove { name, force } => worktree::worktree_remove(name, *force),
             WorktreeSubcommand::List => worktree::worktree_list(),
             WorktreeSubcommand::Switch { name } => worktree::worktree_switch(name),
         },
@@ -246,7 +256,10 @@ fn main() -> Result<(), String> {
 }
 
 fn release() -> Result<(), String> {
-    git_command_status("push main to release", vec!["push", "origin", "main:release"])?;
+    git_command_status(
+        "push main to release",
+        vec!["push", "origin", "main:release"],
+    )?;
     Ok(())
 }
 
@@ -283,6 +296,19 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
         return Err(String::from("--top must be greater than zero."));
     }
 
+    // Phase 1: collect candidate commits in one `git log` pass.
+    let raw_commits = collect_raw_commits(options, &range)?;
+
+    // Phase 2: optionally deduplicate by patch-id.
+    let (effective_commits, duplicates_collapsed) = if options.no_dedup {
+        (raw_commits, 0usize)
+    } else {
+        let shas: Vec<&str> = raw_commits.iter().map(|c| c.sha.as_str()).collect();
+        let patch_ids = compute_patch_ids(&shas)?;
+        dedup_commits(raw_commits, &patch_ids)
+    };
+
+    // Phase 3: tally (filters, aliasing, active windows).
     let mut totals: HashMap<String, usize> = HashMap::new();
     let mut email_to_name: HashMap<String, String> = HashMap::new();
     let mut email_aliases: HashMap<String, String> = HashMap::new();
@@ -295,64 +321,15 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
     let email_filters_lower: Vec<String> =
         options.emails.iter().map(|s| s.to_lowercase()).collect();
 
-    let mut git_args: Vec<String> = vec!["log".to_string()];
-    if !options.all {
-        git_args.push("--first-parent".to_string());
-    }
-    git_args.push("--pretty=format:%ct%x09%an%x09%ae".to_string());
-    if let Some(start_ts) = range.start_ts {
-        git_args.push(format!("--since=@{start_ts}"));
-    }
-    if !range.end_is_latest {
-        git_args.push(format!("--until=@{}", range.end_ts));
-    }
-    git_args.push("HEAD".to_string());
-
-    let mut child = Command::new("git")
-        .args(git_args)
-        .stdout(Stdio::piped())
-        // Avoid buffering/stalling on stderr while still surfacing errors.
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(|err| format!("collect author stats failed to start: {err}"))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| String::from("collect author stats failed to capture stdout"))?;
-    let reader = std::io::BufReader::new(stdout);
-
-    for raw_line in reader.lines() {
-        let raw_line = raw_line
-            .map_err(|err| format!("Failed to read git log output: {err}"))?;
-        let trimmed = raw_line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        let mut parts = trimmed.splitn(3, '\t');
-        let (timestamp_part, name_part, email_part) =
-            match (parts.next(), parts.next(), parts.next()) {
-                (Some(ts), Some(name), Some(email)) => (ts, name, email),
-                _ => {
-                    return Err(format!(
-                        "Unexpected git log output (expected `<timestamp>\\t<name>\\t<email>`): `{trimmed}`"
-                    ));
-                }
-            };
-        if timestamp_part.is_empty() {
-            return Err(format!(
-                "Unexpected git log output (expected `<timestamp>\\t<name>\\t<email>`): `{trimmed}`"
-            ));
-        }
-
-        let timestamp = timestamp_part.parse::<i64>().map_err(|err| {
-            format!("Failed to parse git log timestamp `{timestamp_part}`: {err}")
-        })?;
-
-        let email = email_part.trim();
-        let email = if email.is_empty() { "Unknown" } else { email };
-
-        let name = name_part.trim();
+    // `collect_raw_commits` preserves git log's reverse-chronological order, so
+    // the per-author "latest/oldest" tracking remains correct.
+    for commit in &effective_commits {
+        let email = if commit.email.is_empty() {
+            "Unknown"
+        } else {
+            commit.email.as_str()
+        };
+        let name = commit.name.as_str();
         let canonical_email =
             canonicalize_author(email, name, &mut email_aliases, &mut name_to_email);
 
@@ -371,33 +348,37 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
                 .or_insert_with(|| name.to_string());
         }
 
-        let date = DateTime::from_timestamp(timestamp, 0)
-            .ok_or_else(|| format!("Commit timestamp out of range: {timestamp}"))?
+        let date = DateTime::from_timestamp(commit.timestamp, 0)
+            .ok_or_else(|| format!("Commit timestamp out of range: {}", commit.timestamp))?
             .date_naive();
         if latest_commit_date_in_range.is_none() {
-            // `git log` is reverse-chronological, so the first matching commit is the latest.
             latest_commit_date_in_range = Some(date);
+        } else if let Some(current_latest) = latest_commit_date_in_range {
+            if date > current_latest {
+                latest_commit_date_in_range = Some(date);
+            }
         }
 
-        // Per-author active windows. Because `git log` is reverse chronological:
-        // - the first time we see an author is their latest commit in the range
-        // - the last time we see an author becomes their oldest commit in the range
+        // Per-author windows: track min and max independently because dedup
+        // may have reordered commits relative to git log's stream.
         latest_commit_ts_by_author
             .entry(canonical_email.clone())
-            .or_insert(timestamp);
-        oldest_commit_ts_by_author.insert(canonical_email.clone(), timestamp);
+            .and_modify(|ts| {
+                if commit.timestamp > *ts {
+                    *ts = commit.timestamp;
+                }
+            })
+            .or_insert(commit.timestamp);
+        oldest_commit_ts_by_author
+            .entry(canonical_email.clone())
+            .and_modify(|ts| {
+                if commit.timestamp < *ts {
+                    *ts = commit.timestamp;
+                }
+            })
+            .or_insert(commit.timestamp);
 
         *totals.entry(canonical_email.clone()).or_insert(0) += 1;
-    }
-
-    let status = child
-        .wait()
-        .map_err(|err| format!("collect author stats failed to wait: {err}"))?;
-    if !status.success() {
-        return Err(format!(
-            "collect author stats failed with exit code: {}",
-            status.code().unwrap_or(-1)
-        ));
     }
 
     progress.finish();
@@ -430,7 +411,7 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
     let resolved_end_label = if range.end_is_latest {
         latest_commit_date_in_range
             .map(|date| format!("{date} (latest commit)"))
-            .unwrap_or_else(|| String::from("latest commit"))
+            .unwrap_or_else(|| range.end_label.clone())
     } else {
         range.end_label.clone()
     };
@@ -438,7 +419,16 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
     // Dashboard-style stats list
     println!("Repository Statistics");
     println!("  Range: {} to {}", range.start_label, resolved_end_label);
-    println!("  Total commits: {}", total_commits.to_string().green());
+    let total_commits_str = total_commits.to_string().green();
+    if duplicates_collapsed > 0 {
+        println!(
+            "  Total commits: {total_commits_str} ({} duplicate patch{} collapsed; --no-dedup to disable)",
+            duplicates_collapsed,
+            if duplicates_collapsed == 1 { "" } else { "es" },
+        );
+    } else {
+        println!("  Total commits: {total_commits_str}");
+    }
     println!("  Authors: {}", unique_authors.to_string().green());
 
     let display_author_counts_with_names: Vec<(String, usize)> = display_author_counts
@@ -459,6 +449,222 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
     );
 
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RawCommit {
+    sha: String,
+    timestamp: i64,
+    name: String,
+    email: String,
+}
+
+fn collect_raw_commits(
+    options: &RepoStatsOptions,
+    range: &TimeRange,
+) -> Result<Vec<RawCommit>, String> {
+    let mut git_args: Vec<String> = vec!["log".to_string()];
+    if !options.all {
+        git_args.push("--first-parent".to_string());
+    }
+    git_args.push("--pretty=format:%H%x09%ct%x09%an%x09%ae".to_string());
+    if let Some(start_ts) = range.start_ts {
+        git_args.push(format!("--since=@{start_ts}"));
+    }
+    if !range.end_is_latest {
+        git_args.push(format!("--until=@{}", range.end_ts));
+    }
+    git_args.push("HEAD".to_string());
+
+    let mut child = Command::new("git")
+        .args(git_args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|err| format!("collect author stats failed to start: {err}"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| String::from("collect author stats failed to capture stdout"))?;
+    let reader = std::io::BufReader::new(stdout);
+
+    let mut commits = Vec::new();
+    for raw_line in reader.lines() {
+        let raw_line = raw_line.map_err(|err| format!("Failed to read git log output: {err}"))?;
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let mut parts = trimmed.splitn(4, '\t');
+        let (sha_part, timestamp_part, name_part, email_part) = match (
+            parts.next(),
+            parts.next(),
+            parts.next(),
+            parts.next(),
+        ) {
+            (Some(sha), Some(ts), Some(name), Some(email)) => (sha, ts, name, email),
+            _ => {
+                return Err(format!(
+                        "Unexpected git log output (expected `<sha>\\t<timestamp>\\t<name>\\t<email>`): `{trimmed}`"
+                    ));
+            }
+        };
+        if sha_part.is_empty() || timestamp_part.is_empty() {
+            return Err(format!(
+                "Unexpected git log output (expected `<sha>\\t<timestamp>\\t<name>\\t<email>`): `{trimmed}`"
+            ));
+        }
+
+        let timestamp = timestamp_part.parse::<i64>().map_err(|err| {
+            format!("Failed to parse git log timestamp `{timestamp_part}`: {err}")
+        })?;
+
+        commits.push(RawCommit {
+            sha: sha_part.to_string(),
+            timestamp,
+            name: name_part.trim().to_string(),
+            email: email_part.trim().to_string(),
+        });
+    }
+
+    let status = child
+        .wait()
+        .map_err(|err| format!("collect author stats failed to wait: {err}"))?;
+    if !status.success() {
+        return Err(format!(
+            "collect author stats failed with exit code: {}",
+            status.code().unwrap_or(-1)
+        ));
+    }
+
+    Ok(commits)
+}
+
+/// Resolve each commit SHA to a `git patch-id --stable` value, when one
+/// exists. Returns a map from SHA → patch-id. Commits with no patch
+/// (empty diffs, merge commits) simply won't appear in the map.
+fn compute_patch_ids(shas: &[&str]) -> Result<HashMap<String, String>, String> {
+    if shas.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    // git diff-tree --stdin -p < SHAs  |  git patch-id --stable
+    let mut diff_tree = Command::new("git")
+        .args(["diff-tree", "--stdin", "-p"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|err| format!("failed to spawn `git diff-tree`: {err}"))?;
+
+    let diff_tree_stdout = diff_tree
+        .stdout
+        .take()
+        .ok_or_else(|| String::from("failed to capture `git diff-tree` stdout"))?;
+
+    let mut patch_id = Command::new("git")
+        .args(["patch-id", "--stable"])
+        .stdin(Stdio::from(diff_tree_stdout))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|err| format!("failed to spawn `git patch-id`: {err}"))?;
+
+    // Writer thread feeds SHAs into diff-tree's stdin; the chained patch-id
+    // process consumes diff-tree's stdout concurrently to avoid deadlock on
+    // a full pipe buffer.
+    let mut diff_tree_stdin = diff_tree
+        .stdin
+        .take()
+        .ok_or_else(|| String::from("failed to capture `git diff-tree` stdin"))?;
+    let shas_owned: Vec<String> = shas.iter().map(|s| s.to_string()).collect();
+    let writer = std::thread::spawn(move || -> std::io::Result<()> {
+        for sha in &shas_owned {
+            writeln!(diff_tree_stdin, "{sha}")?;
+        }
+        drop(diff_tree_stdin);
+        Ok(())
+    });
+
+    let patch_id_stdout = patch_id
+        .stdout
+        .take()
+        .ok_or_else(|| String::from("failed to capture `git patch-id` stdout"))?;
+    let reader = std::io::BufReader::new(patch_id_stdout);
+    let mut map: HashMap<String, String> = HashMap::new();
+    for line in reader.lines() {
+        let line = line.map_err(|err| format!("Failed to read patch-id output: {err}"))?;
+        // Each line is "<patch-id> <commit-sha>".
+        let mut parts = line.split_whitespace();
+        let (Some(pid), Some(commit_sha)) = (parts.next(), parts.next()) else {
+            continue;
+        };
+        map.insert(commit_sha.to_string(), pid.to_string());
+    }
+
+    writer
+        .join()
+        .map_err(|_| String::from("patch-id writer thread panicked"))?
+        .map_err(|err| format!("failed writing SHAs to `git diff-tree`: {err}"))?;
+
+    let diff_tree_status = diff_tree
+        .wait()
+        .map_err(|err| format!("`git diff-tree` failed to wait: {err}"))?;
+    if !diff_tree_status.success() {
+        return Err(format!(
+            "`git diff-tree` failed with exit code: {}",
+            diff_tree_status.code().unwrap_or(-1)
+        ));
+    }
+    let patch_id_status = patch_id
+        .wait()
+        .map_err(|err| format!("`git patch-id` failed to wait: {err}"))?;
+    if !patch_id_status.success() {
+        return Err(format!(
+            "`git patch-id` failed with exit code: {}",
+            patch_id_status.code().unwrap_or(-1)
+        ));
+    }
+
+    Ok(map)
+}
+
+/// Collapse commits that share a `git patch-id`. Commits without an
+/// entry in `patch_ids` are treated as unique (their SHA becomes their
+/// own dedup key). For each patch-id group, the winner is the commit
+/// with the smallest `(timestamp, sha)` tuple — i.e. earliest author
+/// date, with SHA breaking ties deterministically.
+///
+/// Returns `(winners, duplicates_collapsed)`.
+fn dedup_commits(
+    commits: Vec<RawCommit>,
+    patch_ids: &HashMap<String, String>,
+) -> (Vec<RawCommit>, usize) {
+    let original_count = commits.len();
+    let mut by_key: HashMap<String, RawCommit> = HashMap::new();
+    for commit in commits {
+        let key = match patch_ids.get(&commit.sha) {
+            Some(pid) => format!("p:{pid}"),
+            None => format!("s:{}", commit.sha),
+        };
+        match by_key.entry(key) {
+            std::collections::hash_map::Entry::Vacant(e) => {
+                e.insert(commit);
+            }
+            std::collections::hash_map::Entry::Occupied(mut e) => {
+                let existing = e.get();
+                let new_key = (commit.timestamp, commit.sha.as_str());
+                let existing_key = (existing.timestamp, existing.sha.as_str());
+                if new_key < existing_key {
+                    e.insert(commit);
+                }
+            }
+        }
+    }
+    let winners: Vec<RawCommit> = by_key.into_values().collect();
+    let dups = original_count - winners.len();
+    (winners, dups)
 }
 
 fn canonicalize_author(
@@ -541,12 +747,20 @@ fn format_active_span(latest_ts: i64, oldest_ts: i64) -> String {
     let years = days / 365.25;
     if years >= 1.0 {
         let rounded = (years * 10.0).round() / 10.0;
-        let unit = if (rounded - 1.0).abs() < 1e-9 { "year" } else { "years" };
+        let unit = if (rounded - 1.0).abs() < 1e-9 {
+            "year"
+        } else {
+            "years"
+        };
         format!("{rounded:.1} {unit}")
     } else {
         let months = days / (365.25 / 12.0);
         let rounded = (months * 10.0).round() / 10.0;
-        let unit = if (rounded - 1.0).abs() < 1e-9 { "month" } else { "months" };
+        let unit = if (rounded - 1.0).abs() < 1e-9 {
+            "month"
+        } else {
+            "months"
+        };
         format!("{rounded:.1} {unit}")
     }
 }
@@ -593,7 +807,11 @@ fn print_author_graph(
                     }
                     let commits_per_week = (*count as f64) / weeks;
                     let span = format_active_span(*latest_ts, *oldest_ts);
-                    Some(format!("({commits_per_week:.1}/wk over {span})").purple().to_string())
+                    Some(
+                        format!("({commits_per_week:.1}/wk over {span})")
+                            .purple()
+                            .to_string(),
+                    )
                 })
                 .unwrap_or_default()
         } else {
@@ -789,13 +1007,7 @@ fn rebase(target: &str, interactive: bool) -> Result<(), String> {
     let fetch_target = format!("{target}:{target}");
     git_command_status(
         "fetch target",
-        vec![
-            "-c",
-            NO_HOOKS,
-            "fetch",
-            "origin",
-            fetch_target.as_str(),
-        ],
+        vec!["-c", NO_HOOKS, "fetch", "origin", fetch_target.as_str()],
     )?;
 
     let mut rebase_args = vec!["-c", NO_HOOKS, "rebase"];
@@ -1202,6 +1414,128 @@ mod tests {
         let oldest = 1_700_000_000;
         let latest = oldest + (399 * 86_400);
         let span = format_active_span(latest, oldest);
-        assert!(span.contains("year"), "expected years in span, got `{span}`");
+        assert!(
+            span.contains("year"),
+            "expected years in span, got `{span}`"
+        );
+    }
+
+    fn raw(sha: &str, ts: i64, name: &str, email: &str) -> RawCommit {
+        RawCommit {
+            sha: sha.to_string(),
+            timestamp: ts,
+            name: name.to_string(),
+            email: email.to_string(),
+        }
+    }
+
+    #[test]
+    fn dedup_commits_no_patch_ids_means_all_unique() {
+        let commits = vec![
+            raw("aaa", 1000, "Alice", "a@example.com"),
+            raw("bbb", 1100, "Bob", "b@example.com"),
+            raw("ccc", 1200, "Cara", "c@example.com"),
+        ];
+        let patch_ids: HashMap<String, String> = HashMap::new();
+        let (winners, dups) = dedup_commits(commits.clone(), &patch_ids);
+        assert_eq!(dups, 0);
+        assert_eq!(winners.len(), 3);
+    }
+
+    #[test]
+    fn dedup_commits_collapses_shared_patch_id_keeping_earliest() {
+        // Two commits share patch-id `pid1`. The earlier author date wins.
+        let commits = vec![
+            raw("late", 2000, "Alice", "a@example.com"),
+            raw("early", 1000, "Bob", "b@example.com"),
+            raw("solo", 1500, "Cara", "c@example.com"),
+        ];
+        let mut patch_ids = HashMap::new();
+        patch_ids.insert("late".to_string(), "pid1".to_string());
+        patch_ids.insert("early".to_string(), "pid1".to_string());
+        patch_ids.insert("solo".to_string(), "pid2".to_string());
+
+        let (mut winners, dups) = dedup_commits(commits, &patch_ids);
+        winners.sort_by(|a, b| a.sha.cmp(&b.sha));
+
+        assert_eq!(dups, 1);
+        assert_eq!(winners.len(), 2);
+
+        let by_sha: HashMap<&str, &RawCommit> =
+            winners.iter().map(|c| (c.sha.as_str(), c)).collect();
+        // Earliest-by-timestamp (1000) wins, attributed to Bob.
+        assert_eq!(by_sha["early"].name, "Bob");
+        // `solo` is unaffected.
+        assert_eq!(by_sha["solo"].name, "Cara");
+        // `late` was dropped.
+        assert!(!by_sha.contains_key("late"));
+    }
+
+    #[test]
+    fn dedup_commits_tiebreaks_equal_timestamps_by_sha() {
+        // Two commits share patch-id AND timestamp. Lower SHA wins for
+        // determinism.
+        let commits = vec![
+            raw("b_sha", 1000, "Alice", "a@example.com"),
+            raw("a_sha", 1000, "Bob", "b@example.com"),
+        ];
+        let mut patch_ids = HashMap::new();
+        patch_ids.insert("b_sha".to_string(), "pid1".to_string());
+        patch_ids.insert("a_sha".to_string(), "pid1".to_string());
+
+        let (winners, dups) = dedup_commits(commits, &patch_ids);
+        assert_eq!(dups, 1);
+        assert_eq!(winners.len(), 1);
+        assert_eq!(winners[0].sha, "a_sha");
+        assert_eq!(winners[0].name, "Bob");
+    }
+
+    #[test]
+    fn dedup_commits_commits_without_patch_id_are_unique_by_sha() {
+        // Two commits with no patch-id mapping (e.g. empty diffs or
+        // merge commits) must NOT collapse together even though they
+        // share author/timestamp.
+        let commits = vec![
+            raw("merge1", 1000, "Alice", "a@example.com"),
+            raw("merge2", 1000, "Alice", "a@example.com"),
+        ];
+        let patch_ids: HashMap<String, String> = HashMap::new();
+        let (winners, dups) = dedup_commits(commits, &patch_ids);
+        assert_eq!(dups, 0);
+        assert_eq!(winners.len(), 2);
+    }
+
+    #[test]
+    fn dedup_commits_mixes_patch_id_and_unmapped_commits() {
+        // A patch-id group of 3, plus an unrelated solo commit, plus an
+        // unmapped (no patch-id) commit. Result: 1 winner from the
+        // group + the solo + the unmapped = 3 winners, 2 duplicates.
+        let commits = vec![
+            raw("x1", 3000, "Alice", "a@example.com"),
+            raw("x2", 1000, "Bob", "b@example.com"),
+            raw("x3", 2000, "Cara", "c@example.com"),
+            raw("solo", 1500, "Dan", "d@example.com"),
+            raw("nopatch", 2500, "Eve", "e@example.com"),
+        ];
+        let mut patch_ids = HashMap::new();
+        patch_ids.insert("x1".to_string(), "pid1".to_string());
+        patch_ids.insert("x2".to_string(), "pid1".to_string());
+        patch_ids.insert("x3".to_string(), "pid1".to_string());
+        patch_ids.insert("solo".to_string(), "pid2".to_string());
+        // `nopatch` intentionally not in the map.
+
+        let (mut winners, dups) = dedup_commits(commits, &patch_ids);
+        winners.sort_by(|a, b| a.sha.cmp(&b.sha));
+
+        assert_eq!(dups, 2);
+        assert_eq!(winners.len(), 3);
+
+        let shas: Vec<&str> = winners.iter().map(|c| c.sha.as_str()).collect();
+        assert!(
+            shas.contains(&"x2"),
+            "earliest (1000) of pid1 group should win, got {shas:?}"
+        );
+        assert!(shas.contains(&"solo"));
+        assert!(shas.contains(&"nopatch"));
     }
 }

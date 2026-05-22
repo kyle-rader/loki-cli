@@ -183,6 +183,19 @@ Analyze commits reachable from HEAD to see who has been landing work in a reposi
 - `--name` filters by author display name (repeatable, case-insensitive).
 - `--email` filters by author email (repeatable, case-insensitive).
 - `--all` includes all commits (default is first-parent only).
+- `--no-dedup` disables patch-id deduplication (see below).
+
+#### Patch-id deduplication
+By default `repo stats` collapses commits that share the same `git patch-id` so that logically-identical changes are only counted once. This keeps contributor counts accurate when repository history contains rebased, cherry-picked, or migrated commits — for example when one repository's history was merged into another and the same patch now exists under two different SHAs.
+
+For each patch-id group, the commit with the earliest author date is attributed to the original author. Commits with no patch (empty diffs, merge commits) are always counted individually.
+
+When duplicates are collapsed, the summary line notes how many were removed:
+```
+Total commits: 4471 (838 duplicate patches collapsed; --no-dedup to disable)
+```
+
+Pass `--no-dedup` to count every SHA individually (the pre-2.5.0 behavior).
 
 #### Example
 ```
