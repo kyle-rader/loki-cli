@@ -75,9 +75,16 @@ struct RepoStatsOptions {
     #[clap(long, default_value_t = 20)]
     top: usize,
 
-    /// Include all commits (disables first-parent-only filtering).
-    #[clap(long, default_value = "false")]
-    all: bool,
+    /// Only count commits on the first-parent chain of HEAD.
+    ///
+    /// By default `lk repo stats` walks every commit reachable from HEAD
+    /// (with patch-id deduplication applied so logically-identical commits
+    /// from rebases / cherry-picks / cross-repo migrations are counted
+    /// once). Pass `--first-parent` to restrict the walk to the mainline
+    /// of merges into HEAD — useful when each PR is merged with a merge
+    /// commit and you want one tally per PR.
+    #[clap(long, default_value_t = false)]
+    first_parent: bool,
 
     /// Only include commits authored by these names (repeatable, case-insensitive fuzzy match).
     #[clap(long = "name", value_name = "NAME")]
@@ -384,14 +391,14 @@ fn repo_stats(options: &RepoStatsOptions) -> Result<(), String> {
     progress.finish();
 
     if totals.is_empty() {
-        if options.all {
+        if options.first_parent {
             println!(
-                "No commits found between {} and {}.",
+                "No first-parent commits found between {} and {}.",
                 range.start_label, range.end_label
             );
         } else {
             println!(
-                "No first-parent commits found between {} and {}.",
+                "No commits found between {} and {}.",
                 range.start_label, range.end_label
             );
         }
@@ -464,7 +471,7 @@ fn collect_raw_commits(
     range: &TimeRange,
 ) -> Result<Vec<RawCommit>, String> {
     let mut git_args: Vec<String> = vec!["log".to_string()];
-    if !options.all {
+    if options.first_parent {
         git_args.push("--first-parent".to_string());
     }
     git_args.push("--pretty=format:%H%x09%ct%x09%an%x09%ae".to_string());
