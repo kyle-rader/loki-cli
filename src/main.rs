@@ -86,10 +86,6 @@ struct RepoStatsOptions {
     #[clap(long, default_value_t = false)]
     first_parent: bool,
 
-    /// Deprecated: walking all commits is now the default; this flag is a no-op.
-    #[clap(long, default_value_t = false, hide = true)]
-    all: bool,
-
     /// Only include commits authored by these names (repeatable, case-insensitive fuzzy match).
     #[clap(long = "name", value_name = "NAME")]
     names: Vec<String>,
