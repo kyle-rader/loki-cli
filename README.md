@@ -182,7 +182,7 @@ Analyze commits reachable from HEAD to see who has been landing work in a reposi
 
 - `--name` filters by author display name (repeatable, case-insensitive).
 - `--email` filters by author email (repeatable, case-insensitive).
-- `--all` includes all commits (default is first-parent only).
+- `--first-parent` restricts the walk to the first-parent chain of HEAD (one tally per merge commit). Default walks all commits reachable from HEAD, relying on patch-id dedup to handle rebased / cherry-picked / migrated history.
 - `--no-dedup` disables patch-id deduplication (see below).
 
 #### Patch-id deduplication
